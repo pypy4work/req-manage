@@ -9,10 +9,12 @@ router.post('/login', async (req, res) => {
     if (!identifier || !password) return res.status(400).json({ error: 'identifier and password required' });
 
     // SQL متوافق مع Postgres و MSSQL
-    const limitClause = DIALECT === 'postgres' ? 'LIMIT 1' : 'TOP 1';
-    const sqlText = `SELECT ${limitClause} user_id, full_name, username, email, role, org_unit_id, job_id, grade_id, picture_url 
+    const limitPrefix = DIALECT === 'postgres' ? '' : 'TOP 1';
+    const limitSuffix = DIALECT === 'postgres' ? 'LIMIT 1' : '';
+    const sqlText = `SELECT ${limitPrefix} user_id, full_name, username, email, role, org_unit_id, job_id, grade_id, picture_url 
       FROM sca.users 
-      WHERE username = @ident OR email = @ident OR national_id = @ident`;
+      WHERE username = @ident OR email = @ident OR national_id = @ident
+      ${limitSuffix}`;
     
     const rows = await query(sqlText, { ident: identifier });
     if (!rows || rows.length === 0) return res.status(404).json({ error: 'User not found' });

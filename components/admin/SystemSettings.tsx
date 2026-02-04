@@ -168,9 +168,15 @@ export const SystemSettingsPanel: React.FC<Props> = ({ onSettingsChange }) => {
                     >
                         <Wifi className="w-4 h-4" /> {t('sqlServer')}
                     </button>
+                    <button 
+                        onClick={() => setSettings({...settings, db_config: {...settings.db_config, connection_type: 'postgres'}})} 
+                        className={`flex-1 md:flex-none px-6 py-2 rounded-md text-sm font-bold transition-all flex items-center gap-2 ${settings.db_config.connection_type === 'postgres' ? 'bg-[var(--bg-card)] text-[var(--primary)] shadow-sm' : 'text-[var(--text-muted)] hover:text-[var(--text-main)]'}`}
+                    >
+                        <Database className="w-4 h-4" /> {t('postgres')}
+                    </button>
                 </div>
 
-                {settings.db_config.connection_type === 'sql_server' ? (
+                {settings.db_config.connection_type !== 'local_mock' ? (
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6 animate-in fade-in">
                         <div className="space-y-4">
                             <div><label className="text-sm font-bold mb-1 block text-[var(--text-main)]">{t('dbHost')}</label><Input placeholder="192.168.1.100 or localhost" value={settings.db_config.host || ''} onChange={(e) => setSettings({...settings, db_config: {...settings.db_config, host: e.target.value}})} className="dir-ltr" /></div>

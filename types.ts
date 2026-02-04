@@ -60,7 +60,7 @@ export type CosmicStructure = 'spiral' | 'atomic' | 'universe' | 'chaos';
 
 // --- Database Configuration ---
 export interface DatabaseConfig {
-  connection_type: 'local_mock' | 'sql_server';
+  connection_type: 'local_mock' | 'sql_server' | 'postgres';
   host?: string;
   database_name?: string;
   username?: string;

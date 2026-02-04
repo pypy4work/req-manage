@@ -11,6 +11,19 @@ const managerRoutes = require('./routes/manager');
 
 const app = express();
 
+// API prefix:
+// - Netlify Functions (serverless): prefer root paths to avoid double /api
+// - Traditional server (Render/Railway/local): keep /api prefix
+const isNetlify = !!process.env.NETLIFY;
+const rawApiPrefix = process.env.API_PREFIX;
+const apiPrefix = rawApiPrefix !== undefined ? rawApiPrefix : (isNetlify ? '' : '/api');
+const normalizePrefix = (prefix) => {
+  if (!prefix) return '';
+  const trimmed = prefix.endsWith('/') ? prefix.slice(0, -1) : prefix;
+  return trimmed.startsWith('/') ? trimmed : `/${trimmed}`;
+};
+const apiBase = normalizePrefix(apiPrefix);
+
 // CORS configuration - allow Netlify frontend
 const allowedOrigins = [
   'http://localhost:5173',
@@ -28,16 +41,20 @@ app.use(bodyParser.json({ limit: '5mb' }));
 app.use(bodyParser.urlencoded({ extended: true }));
 
 // Routes
-app.use('/api/admin', adminRoutes);
-app.use('/api/admin', adminExtendedRoutes); // Extended admin routes
-app.use('/api/auth', authRoutes);
-app.use('/api/employee', employeeRoutes);
-app.use('/api/manager', managerRoutes);
+app.use(`${apiBase}/admin`, adminRoutes);
+app.use(`${apiBase}/admin`, adminExtendedRoutes); // Extended admin routes
+app.use(`${apiBase}/auth`, authRoutes);
+app.use(`${apiBase}/employee`, employeeRoutes);
+app.use(`${apiBase}/manager`, managerRoutes);
 
 app.get('/health', (req, res) => res.json({ status: 'ok', dialect: process.env.DB_DIALECT || 'mssql' }));
 
-const port = process.env.PORT || 4000;
-app.listen(port, () => {
-  console.log(`SCA Backend running on port ${port}`);
-  console.log(`Database dialect: ${process.env.DB_DIALECT || 'mssql'}`);
-});
+if (require.main === module) {
+  const port = process.env.PORT || 4000;
+  app.listen(port, () => {
+    console.log(`SCA Backend running on port ${port}`);
+    console.log(`Database dialect: ${process.env.DB_DIALECT || 'mssql'}`);
+  });
+}
+
+module.exports = app;

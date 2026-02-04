@@ -8,13 +8,22 @@
   publish = "dist"
   
   # Environment variables (set in Netlify dashboard)
-  # VITE_BACKEND_URL=https://your-backend-url.netlify.app or Render/Railway URL
+  # VITE_BACKEND_URL=/api (Netlify Functions) OR https://your-backend-url.onrender.com (Render/Railway)
+
+[[redirects]]
+  # API -> Netlify Functions
+  from = "/api/*"
+  to = "/.netlify/functions/api/:splat"
+  status = 200
 
 [[redirects]]
   # SPA routing - redirect all routes to index.html
   from = "/*"
   to = "/index.html"
   status = 200
+
+[functions]
+  directory = "netlify/functions"
 
 [build.environment]
   NODE_VERSION = "18"

@@ -86,13 +86,26 @@
    ```
 5. Railway سينشر تلقائياً ويعطيك URL
 
-### خيار ج: Netlify Functions (لـ Backend بسيط)
+### خيار ج: Netlify Functions (موصى به لو أردت Backend داخل Netlify)
 
-إذا كان Backend بسيطاً، يمكنك استخدام Netlify Functions:
+تم تجهيز المشروع ليعمل كـ Netlify Functions بشكل صحيح:
 
-1. أنشئ مجلد `netlify/functions` في جذر المشروع
-2. انقل ملفات `server/src` إلى `netlify/functions`
-3. Netlify سيتعامل معها تلقائياً
+1. مجلد الدوال: `netlify/functions`
+2. ملف الدالة الرئيسي: `netlify/functions/api.js`
+3. كود الـ API موجود في: `netlify/functions/src`
+4. يوجد Redirect يوجّه `/api/*` إلى الدالة تلقائياً (في `netlify.toml` و `public/_redirects`)
+
+> النتيجة: يمكنك استدعاء الـ API من الواجهة باستخدام المسار `/api/...` بدون كتابة مسار Functions الكامل.
+
+**Environment Variables المطلوبة للـ Functions (داخل Netlify):**
+```
+DB_DIALECT=postgres
+POSTGRES_URL=postgresql://postgres:[PASSWORD]@db.[PROJECT-REF].supabase.co:5432/postgres
+FRONTEND_URL=https://your-site.netlify.app
+TRAVEL_API_PROVIDER=OSRM
+TRAVEL_API_URL=https://router.project-osrm.org/route/v1/driving
+TRAVEL_API_KEY=
+```
 
 ---
 
@@ -125,10 +138,10 @@ git push -u origin main
 في Netlify Dashboard → **Site settings** → **Environment variables**:
 
 ```
-VITE_BACKEND_URL=https://your-backend-url.onrender.com
+VITE_BACKEND_URL=/api
 ```
 
-(استبدل `your-backend-url.onrender.com` بـ URL الـ Backend من Render/Railway)
+(لو كنت تستخدم Render/Railway بدل Netlify Functions، ضع رابط الـ Backend الكامل)
 
 ### 3.4 Deploy
 

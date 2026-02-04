@@ -18,7 +18,9 @@ const safeJsonParse = (val: any) => {
 
 async function fetch_wrapper(endpoint: string, options?: RequestInit) {
   if (!USE_BACKEND) throw new Error('Backend not configured. Set VITE_BACKEND_URL env var.');
-  const url = `${API_BASE}/api${endpoint}`;
+  const base = API_BASE.replace(/\/+$/, '');
+  const apiRoot = base.endsWith('/api') ? base : `${base}/api`;
+  const url = `${apiRoot}${endpoint}`;
   const resp = await fetch(url, { ...options, headers });
   if (!resp.ok) throw new Error(`HTTP ${resp.status}: ${await resp.text()}`);
   return resp.json();
