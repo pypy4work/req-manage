@@ -39,7 +39,8 @@ const loadSettingsFromStorage = (): SystemSettings => {
 
 let db_settings: SystemSettings = loadSettingsFromStorage();
 
-const shouldUseBackend = () => USE_BACKEND && db_settings.db_config?.connection_type === 'sql_server';
+const isRemoteConnection = () => db_settings.db_config?.connection_type !== 'local_mock';
+const shouldUseBackend = () => USE_BACKEND && isRemoteConnection();
 
 /**
  * Sends payload to N8N webhook and returns the parsed response.
@@ -78,7 +79,7 @@ const sendToN8nWebhook = async (payload: object): Promise<N8nWebhookResponse | n
 };
 
 const smartDelay = async (ms = 400) => {
-    if (db_settings.db_config.connection_type === 'sql_server') {
+    if (isRemoteConnection()) {
         await new Promise(resolve => setTimeout(resolve, ms + Math.random() * 200));
     } else {
         await new Promise(resolve => setTimeout(resolve, 50));
@@ -623,7 +624,7 @@ export const api = {
           db_requests.push(newReq);
 
           const n8nPayload = {
-              meta: { timestamp: new Date().toISOString(), source_system: 'SCA_Request_Management', environment: db_settings.db_config?.connection_type === 'sql_server' ? 'production' : 'mock', event_type: 'leave_request' },
+              meta: { timestamp: new Date().toISOString(), source_system: 'SCA_Request_Management', environment: isRemoteConnection() ? 'production' : 'mock', event_type: 'leave_request' },
               request: { request_id: newReq.request_id, created_at: newReq.created_at, type: { id: def?.id, name: def?.name, unit: def?.unit }, details: { start_date: req.start_date, end_date: req.end_date, duration_calculated: req.duration || 0, start_time: req.start_time, end_time: req.end_time }, custom_fields: req.custom_data || {} },
               employee: { id: user.user_id, national_id: user.national_id, full_name: user.full_name, email: user.email, phone: user.phone_number, job_title: user.job_title, department: { id: user.org_unit_id, name: user.org_unit_name } },
               system_analysis: { logic_engine_results: ruleResults.map((r, i) => ({ rule_id: i + 1, passed: !!r })), recommendation: finalStatus, rejection_reason: rejectionReason || null }
@@ -754,7 +755,7 @@ export const api = {
           db_requests.push(transferRecord as any);
 
           const n8nPayload = {
-              meta: { timestamp: new Date().toISOString(), source_system: 'SCA_Request_Management', environment: db_settings.db_config?.connection_type === 'sql_server' ? 'production' : 'mock', event_type: 'transfer_request' },
+              meta: { timestamp: new Date().toISOString(), source_system: 'SCA_Request_Management', environment: isRemoteConnection() ? 'production' : 'mock', event_type: 'transfer_request' },
               request: { request_id: transferId, transfer_id: transferId, created_at: (transferRecord as any).created_at, type: { id: transferData.template_id, name: 'طلب نقل', unit: 'none' }, details: { reason_for_transfer: transferData.reason_for_transfer, willing_to_relocate: transferData.willing_to_relocate, desired_start_date: transferData.desired_start_date, preferred_units: preferredUnits }, custom_fields: transferData.custom_dynamic_fields || transferData.custom_data || {} },
               employee: { id: userId, national_id: user?.national_id, full_name: (transferRecord as any).employee_name, email: user?.email, phone: user?.phone_number, job_title: user?.job_title, department: { id: user?.org_unit_id, name: user?.org_unit_name } },
               system_analysis: { recommendation: 'PENDING', rejection_reason: null }

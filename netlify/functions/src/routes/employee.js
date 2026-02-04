@@ -18,11 +18,12 @@ router.get('/balances', async (req, res) => {
 router.get('/my-requests/:userId', async (req, res) => {
   try {
     const userId = Number(req.params.userId);
-    const limitClause = DIALECT === 'postgres' ? 'LIMIT 100' : 'TOP 100';
+    const limitPrefix = DIALECT === 'postgres' ? '' : 'TOP 100';
+    const limitSuffix = DIALECT === 'postgres' ? 'LIMIT 100' : '';
     
     // Postgres و MSSQL كلاهما يدعم COALESCE
     const sqlText = `
-      SELECT ${limitClause} *
+      SELECT ${limitPrefix} *
       FROM (
         SELECT 
           r.request_id, r.user_id, r.employee_name, r.type_id,
@@ -50,7 +51,7 @@ router.get('/my-requests/:userId', async (req, res) => {
         LEFT JOIN sca.request_types rt2 ON tr.template_id = rt2.id
         WHERE tr.user_id = @UserId OR tr.employee_id = @UserId
       ) AS combined
-      ORDER BY created_at DESC`;
+      ORDER BY created_at DESC ${limitSuffix}`;
     
     const rows = await query(sqlText, { UserId: userId });
     res.json(rows || []);
@@ -153,9 +154,10 @@ router.post('/transfer-requests', async (req, res) => {
 
     const transferId = await withTransaction(async (tx) => {
       // الحصول على بيانات المستخدم
-      const limitClause = DIALECT === 'postgres' ? 'LIMIT 1' : 'TOP 1';
+      const limitPrefix = DIALECT === 'postgres' ? '' : 'TOP 1';
+      const limitSuffix = DIALECT === 'postgres' ? 'LIMIT 1' : '';
       const userRows = await tx.query(
-        `SELECT ${limitClause} full_name, org_unit_id, job_id, grade_id FROM sca.users WHERE user_id = @UserId`,
+        `SELECT ${limitPrefix} full_name, org_unit_id, job_id, grade_id FROM sca.users WHERE user_id = @UserId ${limitSuffix}`,
         { UserId: userId }
       );
       const userInfo = userRows.rows?.[0] || {};

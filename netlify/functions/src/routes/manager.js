@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const { getPool, sql } = require('../db');
+const { query, DIALECT } = require('../db');
 
 // أداة مساعدة لحساب المسافة بين إحداثيين (Haversine) بالكيلومتر
 function haversineDistance(lat1, lon1, lat2, lon2) {
@@ -87,12 +87,13 @@ router.get('/travel-time', async (req, res) => {
 router.get('/pending-requests/:managerId', async (req, res) => {
   try {
     const managerId = Number(req.params.managerId);
-    const limitClause = DIALECT === 'postgres' ? 'LIMIT 100' : 'TOP 100';
+    const limitPrefix = DIALECT === 'postgres' ? '' : 'TOP 100';
+    const limitSuffix = DIALECT === 'postgres' ? 'LIMIT 100' : '';
     const rows = await query(
-      `SELECT ${limitClause} r.request_id, r.user_id, r.employee_name, r.type_id, rt.name AS leave_name, r.status, r.start_date, r.end_date, r.duration, r.unit, r.created_at
+      `SELECT ${limitPrefix} r.request_id, r.user_id, r.employee_name, r.type_id, rt.name AS leave_name, r.status, r.start_date, r.end_date, r.duration, r.unit, r.created_at
        FROM sca.requests r 
        LEFT JOIN sca.request_types rt ON r.type_id = rt.id
-       WHERE r.status = 'PENDING' ORDER BY r.created_at DESC`
+       WHERE r.status = 'PENDING' ORDER BY r.created_at DESC ${limitSuffix}`
     );
     res.json(rows || []);
   } catch (e) { res.status(500).json({ error: e.message }); }
