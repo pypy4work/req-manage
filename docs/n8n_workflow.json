@@ -1,0 +1,188 @@
+{
+  "name": "SCA Request Management - N8N Integration",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "sca-request",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [100, 300],
+      "webhookId": "sca-request-webhook"
+    },
+    {
+      "parameters": {
+        "rules": {
+          "rules": [
+            {
+              "outputKey": "leave",
+              "conditions": {
+                "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict" },
+                "conditions": [
+                  {
+                    "id": "cond1",
+                    "leftValue": "={{ $json.body.meta.event_type }}",
+                    "rightValue": "leave_request",
+                    "operator": { "type": "string", "operation": "equals" }
+                  }
+                ]
+              }
+            },
+            {
+              "outputKey": "transfer",
+              "conditions": {
+                "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict" },
+                "conditions": [
+                  {
+                    "id": "cond2",
+                    "leftValue": "={{ $json.body.meta.event_type }}",
+                    "rightValue": "transfer_request",
+                    "operator": { "type": "string", "operation": "equals" }
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "name": "Event Type Switch",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3,
+      "position": [320, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict" },
+          "conditions": [
+            {
+              "id": "dur",
+              "leftValue": "={{ $json.body.request.details.duration_calculated || 0 }}",
+              "rightValue": 5,
+              "operator": { "type": "number", "operation": "lte" }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "name": "Auto-Approve Leave?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [540, 200]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            { "id": "a1", "name": "success", "value": true, "type": "boolean" },
+            { "id": "a2", "name": "recommendation", "value": "APPROVE", "type": "string" },
+            { "id": "a3", "name": "auto_approve", "value": true, "type": "boolean" },
+            { "id": "a4", "name": "rejection_reason", "value": null, "type": "object" },
+            { "id": "a5", "name": "message", "value": "تم التحقق من الطلب والموافقة عليه آلياً", "type": "string" },
+            { "id": "a6", "name": "workflow_run_id", "value": "={{ $execution.id }}", "type": "string" }
+          ]
+        },
+        "options": {}
+      },
+      "name": "Response: APPROVE",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [760, 100]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            { "id": "b1", "name": "success", "value": true, "type": "boolean" },
+            { "id": "b2", "name": "recommendation", "value": "PENDING", "type": "string" },
+            { "id": "b3", "name": "auto_approve", "value": false, "type": "boolean" },
+            { "id": "b4", "name": "rejection_reason", "value": null, "type": "object" },
+            { "id": "b5", "name": "message", "value": "الطلب يحتاج مراجعة يدوية من المدير", "type": "string" },
+            { "id": "b6", "name": "workflow_run_id", "value": "={{ $execution.id }}", "type": "string" }
+          ]
+        },
+        "options": {}
+      },
+      "name": "Response: PENDING",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [760, 300]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            { "id": "c1", "name": "success", "value": true, "type": "boolean" },
+            { "id": "c2", "name": "recommendation", "value": "PENDING", "type": "string" },
+            { "id": "c3", "name": "auto_approve", "value": false, "type": "boolean" },
+            { "id": "c4", "name": "rejection_reason", "value": null, "type": "object" },
+            { "id": "c5", "name": "message", "value": "طلب النقل يحتاج مراجعة إدارية", "type": "string" },
+            { "id": "c6", "name": "workflow_run_id", "value": "={{ $execution.id }}", "type": "string" }
+          ]
+        },
+        "options": {}
+      },
+      "name": "Response: Transfer PENDING",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [760, 500]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json }}",
+        "options": {}
+      },
+      "name": "Respond to Webhook",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [980, 300]
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [{ "node": "Event Type Switch", "type": "main", "index": 0 }]
+      ]
+    },
+    "Event Type Switch": {
+      "main": [
+        [{ "node": "Auto-Approve Leave?", "type": "main", "index": 0 }],
+        [{ "node": "Response: Transfer PENDING", "type": "main", "index": 0 }],
+        [{ "node": "Response: PENDING", "type": "main", "index": 0 }]
+      ]
+    },
+    "Auto-Approve Leave?": {
+      "main": [
+        [{ "node": "Response: APPROVE", "type": "main", "index": 0 }],
+        [{ "node": "Response: PENDING", "type": "main", "index": 0 }]
+      ]
+    },
+    "Response: APPROVE": {
+      "main": [
+        [{ "node": "Respond to Webhook", "type": "main", "index": 0 }]
+      ]
+    },
+    "Response: PENDING": {
+      "main": [
+        [{ "node": "Respond to Webhook", "type": "main", "index": 0 }]
+      ]
+    },
+    "Response: Transfer PENDING": {
+      "main": [
+        [{ "node": "Respond to Webhook", "type": "main", "index": 0 }]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "meta": {
+    "templateCredsSetupCompleted": true
+  }
+}

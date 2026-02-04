@@ -1,0 +1,64 @@
+
+{
+  "meta": {
+    "timestamp": "2024-05-15T10:30:00Z",
+    "source_system": "SCA_Leave_Portal_v2",
+    "environment": "production"
+  },
+  "request": {
+    "request_id": 10245,
+    "created_at": "2024-05-15T10:29:55Z",
+    "type": {
+      "id": 5,
+      "name": "Marriage Grant",
+      "unit": "days"
+    },
+    "details": {
+      "start_date": "2024-06-01",
+      "end_date": "2024-06-05",
+      "duration_calculated": 5,
+      "start_time": null,
+      "end_time": null
+    },
+    "custom_fields": {
+      "contract_date": "2024-05-30",
+      "today_date": "2024-05-15",
+      "days_since_contract": 15
+    }
+  },
+  "employee": {
+    "id": 101,
+    "national_id": "29001010101010",
+    "full_name": "Ahmed Mohamed",
+    "email": "ahmed@sca.gov.eg",
+    "phone": "01000000001",
+    "job_title": "Software Engineer",
+    "department": {
+      "id": 5,
+      "name": "Information Technology",
+      "parent_unit": "Engineering Sector"
+    },
+    "balances": [
+      { "leave_type": "Annual", "remaining": 21 },
+      { "leave_type": "Casual", "remaining": 3 }
+    ]
+  },
+  "system_analysis": {
+    "logic_engine_results": [
+      {
+        "rule_id": "lifetime_check",
+        "condition": "usage_count < 1",
+        "passed": true,
+        "actual_value": 0
+      },
+      {
+        "rule_id": "period_check",
+        "condition": "days_since_contract <= 90",
+        "passed": true,
+        "actual_value": 15
+      }
+    ],
+    "recommendation": "APPROVE",
+    "rejection_reason": null
+  }
+}

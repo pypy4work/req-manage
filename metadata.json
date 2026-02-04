@@ -1,0 +1,7 @@
+{
+  "name": "SCA Requests Management System",
+  "description": "Internal Leave & Permissions Management System for the Suez Canal Authority. Features role-based access, n8n automation integration, and PWA support.",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}

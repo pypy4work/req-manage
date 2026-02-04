@@ -1,0 +1,162 @@
+{
+  "$schema": "SCA Request Management - N8N Webhook Integration",
+  "version": "1.0",
+  "description": "مواصفات كاملة لمخرجات التطبيق ورد N8N المستخدم في سير العمل التلقائي",
+
+  "request_to_n8n": {
+    "http_method": "POST",
+    "content_type": "application/json",
+    "headers": {
+      "Content-Type": "application/json",
+      "X-Source": "SCA_Request_Management"
+    },
+    "timeout_seconds": 30,
+    "trigger": "يُرسل تلقائياً عند تقديم طلب (إجازة أو نقل) عند تفعيل وضع N8N",
+
+    "payload_structure": {
+      "meta": {
+        "timestamp": "ISO 8601",
+        "source_system": "SCA_Request_Management",
+        "environment": "mock | production",
+        "event_type": "leave_request | transfer_request"
+      },
+      "request": {
+        "request_id": "number",
+        "transfer_id": "number (للنقل فقط)",
+        "created_at": "ISO 8601",
+        "type": { "id": "number", "name": "string", "unit": "days|hours|amount|none" },
+        "details": "object (يختلف حسب نوع الطلب)",
+        "custom_fields": "object"
+      },
+      "employee": {
+        "id": "number",
+        "national_id": "string",
+        "full_name": "string",
+        "email": "string",
+        "phone": "string",
+        "job_title": "string",
+        "department": { "id": "number", "name": "string" }
+      },
+      "system_analysis": {
+        "logic_engine_results": "array",
+        "recommendation": "string",
+        "rejection_reason": "string | null"
+      }
+    },
+
+    "example_leave": {
+      "meta": {
+        "timestamp": "2025-02-03T12:00:00.000Z",
+        "source_system": "SCA_Request_Management",
+        "environment": "mock",
+        "event_type": "leave_request"
+      },
+      "request": {
+        "request_id": 1738576800000,
+        "created_at": "2025-02-03T12:00:00.000Z",
+        "type": { "id": 1, "name": "إجازة عارضة", "unit": "days" },
+        "details": {
+          "start_date": "2025-02-10",
+          "end_date": "2025-02-12",
+          "duration_calculated": 3,
+          "start_time": null,
+          "end_time": null
+        },
+        "custom_fields": { "reason": "ظرف عائلي" }
+      },
+      "employee": {
+        "id": 4,
+        "national_id": "29501010000000",
+        "full_name": "سارة محمود",
+        "email": "sara.it@sca.gov.eg",
+        "phone": "01111111111",
+        "job_title": "أخصائي نظم معلومات",
+        "department": { "id": 201, "name": "نظم المعلومات والاتصالات" }
+      },
+      "system_analysis": {
+        "logic_engine_results": [{ "rule_id": 1, "passed": true }],
+        "recommendation": "PENDING",
+        "rejection_reason": null
+      }
+    },
+
+    "example_transfer": {
+      "meta": {
+        "timestamp": "2025-02-03T12:00:00.000Z",
+        "source_system": "SCA_Request_Management",
+        "environment": "mock",
+        "event_type": "transfer_request"
+      },
+      "request": {
+        "request_id": 1738576800000,
+        "transfer_id": 1738576800000,
+        "created_at": "2025-02-03T12:00:00.000Z",
+        "type": { "id": 20, "name": "طلب نقل", "unit": "none" },
+        "details": {
+          "reason_for_transfer": "رغبة في التطور المهني",
+          "willing_to_relocate": true,
+          "desired_start_date": "2025-04-01",
+          "preferred_units": [
+            { "unit_id": 20, "preference_order": 1 },
+            { "unit_id": 30, "preference_order": 2 }
+          ]
+        },
+        "custom_fields": {}
+      },
+      "employee": {
+        "id": 4,
+        "national_id": "29501010000000",
+        "full_name": "سارة محمود",
+        "email": "sara.it@sca.gov.eg",
+        "phone": "01111111111",
+        "job_title": "أخصائي نظم معلومات",
+        "department": { "id": 201, "name": "نظم المعلومات والاتصالات" }
+      },
+      "system_analysis": {
+        "recommendation": "PENDING",
+        "rejection_reason": null
+      }
+    }
+  },
+
+  "response_from_n8n": {
+    "description": "يجب أن يُرجع N8N workflow استجابة JSON بهذا الشكل ليتم استخدامها في التطبيق",
+    "required": "يجب استخدام Respond to Webhook في N8N لإرجاع الاستجابة",
+
+    "schema": {
+      "success": "boolean - نجاح المعالجة",
+      "recommendation": "APPROVE | REJECT | PENDING | ESCALATE",
+      "auto_approve": "boolean - إذا true والـ recommendation هو APPROVE يتم الاعتماد التلقائي",
+      "rejection_reason": "string | null - سبب الرفض عند REJECT",
+      "message": "string - رسالة للمستخدم",
+      "workflow_run_id": "string - معرف تشغيل السير للتبع",
+      "extra": "object - بيانات إضافية"
+    },
+
+    "example_approve": {
+      "success": true,
+      "recommendation": "APPROVE",
+      "auto_approve": true,
+      "rejection_reason": null,
+      "message": "تم التحقق من الطلب والموافقة عليه آلياً",
+      "workflow_run_id": "n8n-abc123"
+    },
+
+    "example_reject": {
+      "success": true,
+      "recommendation": "REJECT",
+      "auto_approve": false,
+      "rejection_reason": "تجاوز الحد المسموح للإجازات",
+      "message": "لا يمكن الموافقة على الطلب",
+      "workflow_run_id": "n8n-xyz789"
+    },
+
+    "example_pending": {
+      "success": true,
+      "recommendation": "PENDING",
+      "auto_approve": false,
+      "rejection_reason": null,
+      "message": "الطلب يحتاج مراجعة يدوية"
+    }
+  }
+}
