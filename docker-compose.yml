@@ -1,5 +1,8 @@
 version: '3.8'
 services:
+  # =========================
+  # خيار 1: MSSQL (كما كان)
+  # =========================
   mssql:
     image: mcr.microsoft.com/mssql/server:2019-latest
     container_name: sca_mssql
@@ -16,20 +19,49 @@ services:
     volumes:
       - mssql-data:/var/opt/mssql
 
+  # =========================
+  # خيار 2: Postgres
+  # =========================
+  postgres:
+    image: postgres:15
+    container_name: sca_postgres
+    environment:
+      POSTGRES_DB: sca_requests
+      POSTGRES_USER: sca_user
+      POSTGRES_PASSWORD: sca_pass
+    ports:
+      - "5432:5432"
+    volumes:
+      - pg-data:/var/lib/postgresql/data
+
   backend:
     build: ./server
     container_name: sca_backend
     environment:
-      - DB_HOST=mssql
-      - DB_NAME=master
-      - DB_USER=sa
-      - DB_PASS=Your_password123
+      # اختر واحدة من القاعدتين بتغيير DB_DIALECT وبيانات الاتصال
+
+      # --- تشغيل مع MSSQL داخل الـ Docker (افتراضي قديم) ---
+      # - DB_DIALECT=mssql
+      # - DB_HOST=mssql
+      # - DB_NAME=master
+      # - DB_USER=sa
+      # - DB_PASS=Your_password123
+
+      # --- تشغيل مع Postgres داخل الـ Docker (موصى به) ---
+      - DB_DIALECT=postgres
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_NAME=sca_requests
+      - DB_USER=sca_user
+      - DB_PASS=sca_pass
+
       - PORT=4000
     ports:
       - "4000:4000"
     depends_on:
-      mssql:
-        condition: service_healthy
+      postgres:
+        condition: service_started
 
 volumes:
   mssql-data:
+  pg-data:

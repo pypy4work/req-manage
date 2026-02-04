@@ -1,0 +1,35 @@
+# Netlify configuration for SCA Requests Management System
+# Frontend deployment settings
+
+[build]
+  # Build command
+  command = "npm run build"
+  # Output directory (Vite default)
+  publish = "dist"
+  
+  # Environment variables (set in Netlify dashboard)
+  # VITE_BACKEND_URL=https://your-backend-url.netlify.app or Render/Railway URL
+
+[[redirects]]
+  # SPA routing - redirect all routes to index.html
+  from = "/*"
+  to = "/index.html"
+  status = 200
+
+[build.environment]
+  NODE_VERSION = "18"
+
+# Headers for security
+[[headers]]
+  for = "/*"
+  [headers.values]
+    X-Frame-Options = "DENY"
+    X-XSS-Protection = "1; mode=block"
+    X-Content-Type-Options = "nosniff"
+    Referrer-Policy = "strict-origin-when-cross-origin"
+
+# Cache static assets
+[[headers]]
+  for = "/assets/*"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"

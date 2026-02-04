@@ -87,13 +87,14 @@ router.get('/travel-time', async (req, res) => {
 router.get('/pending-requests/:managerId', async (req, res) => {
   try {
     const managerId = Number(req.params.managerId);
-    const pool = await getPool();
-    const query = `SELECT TOP 100 r.request_id, r.user_id, r.employee_name, r.type_id, rt.name AS leave_name, r.status, r.start_date, r.end_date, r.duration, r.unit, r.created_at
-      FROM sca.requests r 
-      LEFT JOIN sca.request_types rt ON r.type_id = rt.id
-      WHERE r.status = 'PENDING' ORDER BY r.created_at DESC`;
-    const result = await pool.request().query(query);
-    res.json(result.recordset || []);
+    const limitClause = DIALECT === 'postgres' ? 'LIMIT 100' : 'TOP 100';
+    const rows = await query(
+      `SELECT ${limitClause} r.request_id, r.user_id, r.employee_name, r.type_id, rt.name AS leave_name, r.status, r.start_date, r.end_date, r.duration, r.unit, r.created_at
+       FROM sca.requests r 
+       LEFT JOIN sca.request_types rt ON r.type_id = rt.id
+       WHERE r.status = 'PENDING' ORDER BY r.created_at DESC`
+    );
+    res.json(rows || []);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -102,14 +103,17 @@ router.post('/action-request/:requestId', async (req, res) => {
   try {
     const requestId = Number(req.params.requestId);
     const { action, reason } = req.body;
-    const pool = await getPool();
     const newStatus = action === 'Approve' ? 'APPROVED' : 'REJECTED';
-    const query = `UPDATE sca.requests SET status = @Status, decision_at = SYSUTCDATETIME(), rejection_reason = @Reason WHERE request_id = @Id`;
-    await pool.request()
-      .input('Id', sql.BigInt, requestId)
-      .input('Status', sql.NVarChar(50), newStatus)
-      .input('Reason', sql.NVarChar(1000), reason || null)
-      .query(query);
+    const nowFunc = DIALECT === 'postgres' ? 'NOW()' : 'SYSUTCDATETIME()';
+    
+    await query(
+      `UPDATE sca.requests SET status = @Status, decision_at = ${nowFunc}, rejection_reason = @Reason WHERE request_id = @Id`,
+      {
+        Id: requestId,
+        Status: newStatus,
+        Reason: reason || null
+      }
+    );
     res.json({ success: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -118,12 +122,13 @@ router.post('/action-request/:requestId', async (req, res) => {
 router.get('/stats/:userId', async (req, res) => {
   try {
     const userId = Number(req.params.userId);
-    const pool = await getPool();
     
     // Simple stats (expand in production)
-    const pendingCount = await pool.request().query(`SELECT COUNT(*) as cnt FROM sca.requests WHERE status='PENDING'`);
+    const pendingRows = await query('SELECT COUNT(*) as cnt FROM sca.requests WHERE status = @Status', { Status: 'PENDING' });
+    const pendingCount = pendingRows[0]?.cnt || 0;
+    
     res.json({
-      pendingCount: pendingCount.recordset[0].cnt || 0,
+      pendingCount: pendingCount,
       processedToday: 5,
       unitStats: { date: new Date().toISOString().split('T')[0], unit_name: 'My Unit', total_strength: 25, present: 22, absent: 0, on_leave: 3, attendance_percentage: 88 },
       totalUnitEmployees: 25,
@@ -139,10 +144,7 @@ router.get('/stats/:userId', async (req, res) => {
 router.get('/transfer-requests/:managerId', async (req, res) => {
   try {
     const managerId = Number(req.params.managerId);
-    const pool = await getPool();
-    const request = pool.request();
-    request.input('ManagerId', sql.Int, managerId);
-    const query = `
+    const rows = await query(`
       SELECT 
         tr.transfer_id, tr.user_id, tr.employee_id, tr.employee_name,
         tr.template_id, tr.status, tr.current_unit_id, tr.current_job_id, tr.current_grade_id,
@@ -151,9 +153,10 @@ router.get('/transfer-requests/:managerId', async (req, res) => {
       FROM sca.transfer_requests tr
       WHERE tr.status IN ('PENDING', 'MANAGER_REVIEW')
         AND (tr.assignee_id = @ManagerId OR tr.assignee_id IS NULL)
-      ORDER BY tr.submission_date DESC`;
-    const result = await request.query(query);
-    res.json(result.recordset || []);
+      ORDER BY tr.submission_date DESC`,
+      { ManagerId: managerId }
+    );
+    res.json(rows || []);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -161,18 +164,20 @@ router.get('/transfer-requests/:managerId', async (req, res) => {
 router.post('/transfer-assessments', async (req, res) => {
   try {
     const { transfer_id, manager_id, performance_rating, readiness_for_transfer, recommendation } = req.body;
-    const pool = await getPool();
-    await pool.request()
-      .input('TransferId', sql.Int, transfer_id)
-      .input('ManagerId', sql.Int, manager_id)
-      .input('PerformanceRating', sql.NVarChar(20), performance_rating)
-      .input('ReadinessForTransfer', sql.NVarChar(20), readiness_for_transfer)
-      .input('Recommendation', sql.NVarChar(sql.MAX), recommendation || null)
-      .query(`
-        INSERT INTO sca.transfer_manager_assessments
-        (transfer_id, manager_id, performance_rating, readiness_for_transfer, recommendation, assessment_date)
-        VALUES (@TransferId, @ManagerId, @PerformanceRating, @ReadinessForTransfer, @Recommendation, GETDATE())
-      `);
+    const nowFunc = DIALECT === 'postgres' ? 'NOW()' : 'GETDATE()';
+    
+    await query(
+      `INSERT INTO sca.transfer_manager_assessments
+       (transfer_id, manager_id, performance_rating, readiness_for_transfer, recommendation, assessment_date)
+       VALUES (@TransferId, @ManagerId, @PerformanceRating, @ReadinessForTransfer, @Recommendation, ${nowFunc})`,
+      {
+        TransferId: transfer_id,
+        ManagerId: manager_id,
+        PerformanceRating: performance_rating,
+        ReadinessForTransfer: readiness_for_transfer,
+        Recommendation: recommendation || null
+      }
+    );
     res.json({ success: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });

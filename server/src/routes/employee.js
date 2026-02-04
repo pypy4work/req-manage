@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const { getPool, sql } = require('../db');
+const { query, DIALECT, insertAndGetId, sqlLimit, sqlCoalesce, withTransaction } = require('../db');
 
 // GET /api/employee/balances
 router.get('/balances', async (req, res) => {
@@ -18,11 +18,11 @@ router.get('/balances', async (req, res) => {
 router.get('/my-requests/:userId', async (req, res) => {
   try {
     const userId = Number(req.params.userId);
-    const pool = await getPool();
-    const request = pool.request();
-    request.input('UserId', sql.Int, userId);
-    const query = `
-      SELECT TOP 100 *
+    const limitClause = DIALECT === 'postgres' ? 'LIMIT 100' : 'TOP 100';
+    
+    // Postgres و MSSQL كلاهما يدعم COALESCE
+    const sqlText = `
+      SELECT ${limitClause} *
       FROM (
         SELECT 
           r.request_id, r.user_id, r.employee_name, r.type_id,
@@ -33,7 +33,7 @@ router.get('/my-requests/:userId', async (req, res) => {
         WHERE r.user_id = @UserId
         UNION ALL
         SELECT 
-          ISNULL(tr.request_id, tr.transfer_id) as request_id,
+          tr.transfer_id as request_id,
           tr.user_id,
           tr.employee_name,
           tr.template_id as type_id,
@@ -51,8 +51,9 @@ router.get('/my-requests/:userId', async (req, res) => {
         WHERE tr.user_id = @UserId OR tr.employee_id = @UserId
       ) AS combined
       ORDER BY created_at DESC`;
-    const result = await request.query(query);
-    res.json(result.recordset || []);
+    
+    const rows = await query(sqlText, { UserId: userId });
+    res.json(rows || []);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -60,23 +61,25 @@ router.get('/my-requests/:userId', async (req, res) => {
 router.post('/submit-request', async (req, res) => {
   try {
     const { user_id, employee_name, type_id, duration, start_date, end_date, custom_data } = req.body;
-    const pool = await getPool();
-    const request = pool.request();
-    request.input('UserId', sql.Int, user_id);
-    request.input('EmployeeName', sql.NVarChar(300), employee_name);
-    request.input('TypeId', sql.Int, type_id);
-    request.input('Duration', sql.Decimal(18, 2), duration || 0);
-    request.input('StartDate', sql.Date, start_date || null);
-    request.input('EndDate', sql.Date, end_date || null);
-    request.input('CustomData', sql.NVarChar(sql.MAX), custom_data ? JSON.stringify(custom_data) : null);
-    request.input('Status', sql.NVarChar(50), 'PENDING');
-    request.input('Unit', sql.NVarChar(20), 'days');
-
-    const query = `INSERT INTO sca.requests (user_id, employee_id, employee_name, type_id, status, start_date, end_date, duration, unit, custom_data, created_at)
-      VALUES (@UserId, @UserId, @EmployeeName, @TypeId, @Status, @StartDate, @EndDate, @Duration, @Unit, @CustomData, SYSUTCDATETIME());
-      SELECT @@IDENTITY as request_id;`;
-    const result = await request.query(query);
-    const reqId = result.recordset[0].request_id;
+    
+    const customDataJson = custom_data ? JSON.stringify(custom_data) : null;
+    const nowFunc = DIALECT === 'postgres' ? 'NOW()' : 'SYSUTCDATETIME()';
+    
+    const sqlText = `INSERT INTO sca.requests (user_id, employee_id, employee_name, type_id, status, start_date, end_date, duration, unit, custom_data, created_at)
+      VALUES (@UserId, @UserId, @EmployeeName, @TypeId, @Status, @StartDate, @EndDate, @Duration, @Unit, @CustomData, ${nowFunc})`;
+    
+    const reqId = await insertAndGetId(sqlText, {
+      UserId: user_id,
+      EmployeeName: employee_name,
+      TypeId: type_id,
+      Status: 'PENDING',
+      StartDate: start_date || null,
+      EndDate: end_date || null,
+      Duration: duration || 0,
+      Unit: 'days',
+      CustomData: customDataJson
+    }, 'request_id');
+    
     res.json({ request_id: reqId, status: 'PENDING' });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -85,10 +88,7 @@ router.post('/submit-request', async (req, res) => {
 router.get('/my-transfers/:userId', async (req, res) => {
   try {
     const userId = Number(req.params.userId);
-    const pool = await getPool();
-    const request = pool.request();
-    request.input('UserId', sql.Int, userId);
-    const query = `
+    const sqlText = `
       SELECT 
         tr.transfer_id, tr.user_id, tr.employee_id, tr.employee_name,
         tr.template_id, tr.status, tr.current_unit_id, tr.current_job_id, tr.current_grade_id,
@@ -103,17 +103,24 @@ router.get('/my-transfers/:userId', async (req, res) => {
       LEFT JOIN sca.organizational_units ou2 ON tr.allocated_unit_id = ou2.unit_id
       WHERE tr.user_id = @UserId OR tr.employee_id = @UserId
       ORDER BY tr.submission_date DESC`;
-    const result = await request.query(query);
-    const transfers = result.recordset || [];
-
+    
+    const transfers = await query(sqlText, { UserId: userId });
     if (transfers.length === 0) return res.json([]);
 
-    const ids = transfers.map(t => t.transfer_id).join(',');
-    const prefsQuery = `SELECT transfer_id, unit_id, preference_order, reason FROM sca.transfer_preferences WHERE transfer_id IN (${ids}) ORDER BY preference_order`;
-    const prefs = await pool.request().query(prefsQuery);
+    const ids = transfers.map(t => t.transfer_id);
+    const placeholders = DIALECT === 'postgres' 
+      ? ids.map((_, i) => `$${i + 1}`).join(',')
+      : ids.join(',');
+    
+    const prefsSql = DIALECT === 'postgres'
+      ? `SELECT transfer_id, unit_id, preference_order, reason FROM sca.transfer_preferences WHERE transfer_id = ANY($1::bigint[]) ORDER BY preference_order`
+      : `SELECT transfer_id, unit_id, preference_order, reason FROM sca.transfer_preferences WHERE transfer_id IN (${placeholders}) ORDER BY preference_order`;
+    
+    const prefsParams = DIALECT === 'postgres' ? { '1': ids } : {};
+    const prefs = await query(prefsSql, prefsParams);
 
     const prefMap = new Map();
-    (prefs.recordset || []).forEach(p => {
+    (prefs || []).forEach(p => {
       if (!prefMap.has(p.transfer_id)) prefMap.set(p.transfer_id, []);
       prefMap.get(p.transfer_id).push(p);
     });
@@ -144,60 +151,75 @@ router.post('/transfer-requests', async (req, res) => {
     const employeeId = Number(employee_id || user_id);
     const userId = Number(user_id || employee_id);
 
-    const pool = await getPool();
-    const trx = new sql.Transaction(pool);
-    await trx.begin();
-    try {
-      const userReq = new sql.Request(trx);
-      userReq.input('UserId', sql.Int, userId);
-      const userRow = await userReq.query('SELECT TOP 1 full_name, org_unit_id, job_id, grade_id FROM sca.users WHERE user_id = @UserId');
-      const userInfo = userRow.recordset?.[0] || {};
+    const transferId = await withTransaction(async (tx) => {
+      // الحصول على بيانات المستخدم
+      const limitClause = DIALECT === 'postgres' ? 'LIMIT 1' : 'TOP 1';
+      const userRows = await tx.query(
+        `SELECT ${limitClause} full_name, org_unit_id, job_id, grade_id FROM sca.users WHERE user_id = @UserId`,
+        { UserId: userId }
+      );
+      const userInfo = userRows.rows?.[0] || {};
 
-      const insertReq = new sql.Request(trx);
-      insertReq.input('UserId', sql.Int, userId);
-      insertReq.input('EmployeeId', sql.Int, employeeId);
-      insertReq.input('EmployeeName', sql.NVarChar(200), userInfo.full_name || null);
-      insertReq.input('TemplateId', sql.Int, Number(template_id));
-      insertReq.input('Status', sql.NVarChar(30), 'PENDING');
-      insertReq.input('CurrentUnitId', sql.Int, userInfo.org_unit_id || 0);
-      insertReq.input('CurrentJobId', sql.Int, userInfo.job_id || 0);
-      insertReq.input('CurrentGradeId', sql.Int, userInfo.grade_id || 0);
-      insertReq.input('Reason', sql.NVarChar(sql.MAX), reason_for_transfer || '');
-      insertReq.input('Willing', sql.Bit, willing_to_relocate ? 1 : 0);
-      insertReq.input('DesiredStartDate', sql.Date, desired_start_date || null);
-      insertReq.input('AdditionalNotes', sql.NVarChar(sql.MAX), additional_notes || null);
-      insertReq.input('CustomDynamic', sql.NVarChar(sql.MAX), JSON.stringify(custom_dynamic_fields || custom_data || {}));
+      // إدراج طلب النقل
+      const customDynamicJson = JSON.stringify(custom_dynamic_fields || custom_data || {});
+      const nowFunc = DIALECT === 'postgres' ? 'NOW()' : 'GETDATE()';
+      const dateCast = DIALECT === 'postgres' ? 'CURRENT_DATE' : 'CAST(GETDATE() AS DATE)';
+      const willingBool = willing_to_relocate ? (DIALECT === 'postgres' ? true : 1) : (DIALECT === 'postgres' ? false : 0);
 
-      const insertQuery = `
-        INSERT INTO sca.transfer_requests
-        (user_id, employee_id, employee_name, template_id, status, current_unit_id, current_job_id, current_grade_id, reason_for_transfer,
-         willing_to_relocate, desired_start_date, additional_notes, submission_date, created_at, custom_dynamic_fields)
-        VALUES
-        (@UserId, @EmployeeId, @EmployeeName, @TemplateId, @Status, @CurrentUnitId, @CurrentJobId, @CurrentGradeId, @Reason,
-         @Willing, @DesiredStartDate, @AdditionalNotes, CAST(GETDATE() AS DATE), GETDATE(), @CustomDynamic);
-        SELECT SCOPE_IDENTITY() as transfer_id;`;
-      const insertRes = await insertReq.query(insertQuery);
-      const transferId = insertRes.recordset?.[0]?.transfer_id;
+      const insertSql = DIALECT === 'postgres'
+        ? `INSERT INTO sca.transfer_requests
+           (user_id, employee_id, employee_name, template_id, status, current_unit_id, current_job_id, current_grade_id, reason_for_transfer,
+            willing_to_relocate, desired_start_date, additional_notes, submission_date, created_at, custom_dynamic_fields)
+           VALUES
+           (@UserId, @EmployeeId, @EmployeeName, @TemplateId, @Status, @CurrentUnitId, @CurrentJobId, @CurrentGradeId, @Reason,
+            @Willing, @DesiredStartDate, @AdditionalNotes, ${dateCast}, ${nowFunc}, @CustomDynamic) RETURNING transfer_id`
+        : `INSERT INTO sca.transfer_requests
+           (user_id, employee_id, employee_name, template_id, status, current_unit_id, current_job_id, current_grade_id, reason_for_transfer,
+            willing_to_relocate, desired_start_date, additional_notes, submission_date, created_at, custom_dynamic_fields)
+           VALUES
+           (@UserId, @EmployeeId, @EmployeeName, @TemplateId, @Status, @CurrentUnitId, @CurrentJobId, @CurrentGradeId, @Reason,
+            @Willing, @DesiredStartDate, @AdditionalNotes, ${dateCast}, ${nowFunc}, @CustomDynamic);
+           SELECT SCOPE_IDENTITY() AS transfer_id`;
+      
+      const insertResult = await tx.query(insertSql, {
+        UserId: userId,
+        EmployeeId: employeeId,
+        EmployeeName: userInfo.full_name || null,
+        TemplateId: Number(template_id),
+        Status: 'PENDING',
+        CurrentUnitId: userInfo.org_unit_id || 0,
+        CurrentJobId: userInfo.job_id || 0,
+        CurrentGradeId: userInfo.grade_id || 0,
+        Reason: reason_for_transfer || '',
+        Willing: willingBool,
+        DesiredStartDate: desired_start_date || null,
+        AdditionalNotes: additional_notes || null,
+        CustomDynamic: customDynamicJson
+      });
+      
+      const transferId = DIALECT === 'postgres' 
+        ? insertResult.rows[0]?.transfer_id
+        : insertResult.rows[0]?.transfer_id || insertResult.rows?.[0]?.['SCOPE_IDENTITY()'];
 
+      // إدراج التفضيلات
       if (Array.isArray(preferred_units)) {
         for (const pref of preferred_units) {
-          const prefReq = new sql.Request(trx);
-          prefReq.input('TransferId', sql.Int, transferId);
-          prefReq.input('UnitId', sql.Int, Number(pref.unit_id));
-          prefReq.input('PreferenceOrder', sql.Int, Number(pref.preference_order));
-          prefReq.input('Reason', sql.NVarChar(500), pref.reason || null);
-          await prefReq.query(
-            'INSERT INTO sca.transfer_preferences (transfer_id, unit_id, preference_order, reason) VALUES (@TransferId, @UnitId, @PreferenceOrder, @Reason)'
+          await tx.query(
+            'INSERT INTO sca.transfer_preferences (transfer_id, unit_id, preference_order, reason) VALUES (@TransferId, @UnitId, @PreferenceOrder, @Reason)',
+            {
+              TransferId: transferId,
+              UnitId: Number(pref.unit_id),
+              PreferenceOrder: Number(pref.preference_order),
+              Reason: pref.reason || null
+            }
           );
         }
       }
 
-      await trx.commit();
-      res.json({ transfer_id: transferId, status: 'PENDING' });
-    } catch (e) {
-      await trx.rollback();
-      throw e;
-    }
+      return transferId;
+    });
+
+    res.json({ transfer_id: transferId, status: 'PENDING' });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -206,50 +228,47 @@ router.put('/transfer-requests/:id', async (req, res) => {
   try {
     const transferId = Number(req.params.id);
     const { reason_for_transfer, willing_to_relocate, desired_start_date, additional_notes, preferred_units, custom_dynamic_fields, custom_data } = req.body;
-    const pool = await getPool();
-    const trx = new sql.Transaction(pool);
-    await trx.begin();
-    try {
-      const updReq = new sql.Request(trx);
-      updReq.input('TransferId', sql.Int, transferId);
-      updReq.input('Reason', sql.NVarChar(sql.MAX), reason_for_transfer || '');
-      updReq.input('Willing', sql.Bit, willing_to_relocate ? 1 : 0);
-      updReq.input('DesiredStartDate', sql.Date, desired_start_date || null);
-      updReq.input('AdditionalNotes', sql.NVarChar(sql.MAX), additional_notes || null);
-      updReq.input('CustomDynamic', sql.NVarChar(sql.MAX), JSON.stringify(custom_dynamic_fields || custom_data || {}));
-      await updReq.query(`
+    
+    await withTransaction(async (tx) => {
+      const customDynamicJson = JSON.stringify(custom_dynamic_fields || custom_data || {});
+      const willingBool = willing_to_relocate ? (DIALECT === 'postgres' ? true : 1) : (DIALECT === 'postgres' ? false : 0);
+      
+      await tx.query(`
         UPDATE sca.transfer_requests
         SET reason_for_transfer = @Reason,
             willing_to_relocate = @Willing,
             desired_start_date = @DesiredStartDate,
             additional_notes = @AdditionalNotes,
-            custom_dynamic_fields = @CustomDynamic,
-            is_edited = 1
-        WHERE transfer_id = @TransferId AND status = 'PENDING'
-      `);
+            custom_dynamic_fields = @CustomDynamic
+        WHERE transfer_id = @TransferId AND status = 'PENDING'`,
+        {
+          TransferId: transferId,
+          Reason: reason_for_transfer || '',
+          Willing: willingBool,
+          DesiredStartDate: desired_start_date || null,
+          AdditionalNotes: additional_notes || null,
+          CustomDynamic: customDynamicJson
+        }
+      );
 
-      await new sql.Request(trx).input('TransferId', sql.Int, transferId)
-        .query('DELETE FROM sca.transfer_preferences WHERE transfer_id = @TransferId');
+      await tx.query('DELETE FROM sca.transfer_preferences WHERE transfer_id = @TransferId', { TransferId: transferId });
 
       if (Array.isArray(preferred_units)) {
         for (const pref of preferred_units) {
-          const prefReq = new sql.Request(trx);
-          prefReq.input('TransferId', sql.Int, transferId);
-          prefReq.input('UnitId', sql.Int, Number(pref.unit_id));
-          prefReq.input('PreferenceOrder', sql.Int, Number(pref.preference_order));
-          prefReq.input('Reason', sql.NVarChar(500), pref.reason || null);
-          await prefReq.query(
-            'INSERT INTO sca.transfer_preferences (transfer_id, unit_id, preference_order, reason) VALUES (@TransferId, @UnitId, @PreferenceOrder, @Reason)'
+          await tx.query(
+            'INSERT INTO sca.transfer_preferences (transfer_id, unit_id, preference_order, reason) VALUES (@TransferId, @UnitId, @PreferenceOrder, @Reason)',
+            {
+              TransferId: transferId,
+              UnitId: Number(pref.unit_id),
+              PreferenceOrder: Number(pref.preference_order),
+              Reason: pref.reason || null
+            }
           );
         }
       }
+    });
 
-      await trx.commit();
-      res.json({ success: true });
-    } catch (e) {
-      await trx.rollback();
-      throw e;
-    }
+    res.json({ success: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -258,16 +277,19 @@ router.put('/requests/:id', async (req, res) => {
   try {
     const id = Number(req.params.id);
     const { duration, start_date, end_date, custom_data } = req.body;
-    const pool = await getPool();
-    const query = `UPDATE sca.requests SET duration = @Duration, start_date = @StartDate, end_date = @EndDate, custom_data = @CustomData
-      WHERE request_id = @Id`;
-    await pool.request()
-      .input('Id', sql.BigInt, id)
-      .input('Duration', sql.Decimal(18, 2), duration)
-      .input('StartDate', sql.Date, start_date)
-      .input('EndDate', sql.Date, end_date)
-      .input('CustomData', sql.NVarChar(sql.MAX), custom_data ? JSON.stringify(custom_data) : null)
-      .query(query);
+    
+    const customDataJson = custom_data ? JSON.stringify(custom_data) : null;
+    
+    await query(
+      'UPDATE sca.requests SET duration = @Duration, start_date = @StartDate, end_date = @EndDate, custom_data = @CustomData WHERE request_id = @Id',
+      {
+        Id: id,
+        Duration: duration,
+        StartDate: start_date,
+        EndDate: end_date,
+        CustomData: customDataJson
+      }
+    );
     res.json({ success: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
