@@ -306,7 +306,7 @@ ON CONFLICT (list_name) DO NOTHING;
 INSERT INTO sca.admin_list_items (list_id, item_label, item_value)
 SELECT l.list_id, v.label, v.val
 FROM sca.admin_lists l
-JOIN (
+CROSS JOIN (
   VALUES
     ('Organizational Restructure', 'restructure'),
     ('Capacity Need', 'capacity'),
@@ -337,4 +337,3 @@ VALUES
   ('admin:settings', 'إعدادات النظام', 'تعديل إعدادات النظام', 'النظام'),
   ('admin:permissions', 'إدارة الصلاحيات', 'تعيين صلاحيات المستخدمين', 'النظام')
 ON CONFLICT (permission_key) DO NOTHING;
-
