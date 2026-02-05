@@ -26,7 +26,10 @@
   directory = "netlify/functions"
 
 [build.environment]
-  NODE_VERSION = "18"
+  # Frontend build (Vite)
+  NODE_VERSION = "20"
+  # Backend (Netlify Functions) runtime:
+  # Set AWS_LAMBDA_JS_RUNTIME=nodejs18.x in Netlify UI/CLI (can't be set here).
 
 # Headers for security
 [[headers]]

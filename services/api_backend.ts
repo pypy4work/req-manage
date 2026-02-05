@@ -8,7 +8,18 @@
 import { API_BASE, USE_BACKEND } from '../utils/config';
 import { User, LoginResult, RequestDefinition, GenericRequest, AllowanceBalance } from '../types';
 
-const headers = { 'Content-Type': 'application/json' };
+const baseHeaders = { 'Content-Type': 'application/json' };
+
+const buildHeaders = () => {
+  const headers: Record<string, string> = { ...baseHeaders };
+  try {
+    const userId = localStorage.getItem('sca_user_id');
+    if (userId) headers['X-User-Id'] = userId;
+  } catch {
+    // ignore localStorage access errors (SSR/testing)
+  }
+  return headers;
+};
 
 const safeJsonParse = (val: any) => {
   if (val == null) return val;
@@ -21,7 +32,7 @@ async function fetch_wrapper(endpoint: string, options?: RequestInit) {
   const base = API_BASE.replace(/\/+$/, '');
   const apiRoot = base.endsWith('/api') ? base : `${base}/api`;
   const url = `${apiRoot}${endpoint}`;
-  const resp = await fetch(url, { ...options, headers });
+  const resp = await fetch(url, { ...options, headers: { ...buildHeaders(), ...(options?.headers || {}) } });
   if (!resp.ok) throw new Error(`HTTP ${resp.status}: ${await resp.text()}`);
   return resp.json();
 }
@@ -38,8 +49,9 @@ export const api_backend = {
   },
 
   employee: {
-    getBalances: async (employeeId?: number) => {
-      return await fetch_wrapper('/employee/balances');
+    getBalances: async (userId?: number) => {
+      const qs = userId ? `?userId=${encodeURIComponent(String(userId))}` : '';
+      return await fetch_wrapper(`/employee/balances${qs}`);
     },
 
     getMyRequests: async (id: number) => {
@@ -48,6 +60,9 @@ export const api_backend = {
         ...r,
         custom_data: safeJsonParse(r.custom_data) || {}
       }));
+    },
+    getCareerHistory: async (userId: number) => {
+      return await fetch_wrapper(`/employee/career-history/${userId}`);
     },
 
     getMyTransfers: async (employeeId: number) => {
@@ -102,6 +117,9 @@ export const api_backend = {
         ...t,
         custom_dynamic_fields: safeJsonParse(t.custom_dynamic_fields) || {}
       }));
+    },
+    getCareerHistory: async (userId: number) => {
+      return await fetch_wrapper(`/employee/career-history/${userId}`);
     },
 
     addTransferAssessment: async (assessment: any) => {
@@ -185,8 +203,41 @@ export const api_backend = {
       });
     },
 
+    getSettings: async () => {
+      return await fetch_wrapper('/admin/settings');
+    },
+
+    updateSettings: async (settings: any) => {
+      return await fetch_wrapper('/admin/settings', {
+        method: 'PUT',
+        body: JSON.stringify(settings)
+      });
+    },
+
+    testDatabaseConnection: async (config?: any) => {
+      return await fetch_wrapper('/admin/test-db', {
+        method: 'POST',
+        body: JSON.stringify(config || {})
+      });
+    },
+
+    testN8nWebhook: async () => {
+      return await fetch_wrapper('/admin/n8n-test', {
+        method: 'POST',
+        body: JSON.stringify({})
+      });
+    },
+
     getPermissionsCatalog: async () => {
       return await fetch_wrapper('/admin/permissions');
+    },
+
+    getDatabaseTables: async () => {
+      return await fetch_wrapper('/admin/db/tables');
+    },
+
+    getTableData: async (table: string) => {
+      return await fetch_wrapper(`/admin/db/table/${encodeURIComponent(table)}`);
     },
 
     getUserPermissions: async (userId: number) => {

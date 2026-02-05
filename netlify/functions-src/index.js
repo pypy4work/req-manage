@@ -1,15 +1,34 @@
+const fs = require('fs');
+const path = require('path');
+const dotenv = require('dotenv');
 const express = require('express');
 const cors = require('cors');
 const bodyParser = require('body-parser');
-require('dotenv').config();
+
+const envCandidates = [
+  path.resolve(process.cwd(), '.env'),
+  path.resolve(process.cwd(), 'server', '.env')
+];
+
+for (const envPath of envCandidates) {
+  if (fs.existsSync(envPath)) {
+    dotenv.config({ path: envPath });
+  }
+}
+
+const { initDbRouter, getRouterState } = require('./db');
+const { withRequestContext } = require('./db-context');
+const { createRateLimiter } = require('./rate-limit');
 
 const adminRoutes = require('./routes/admin');
 const adminExtendedRoutes = require('./routes/admin-extended');
 const authRoutes = require('./routes/auth');
 const employeeRoutes = require('./routes/employee');
 const managerRoutes = require('./routes/manager');
+const systemRoutes = require('./routes/system');
 
 const app = express();
+app.set('trust proxy', true);
 
 // API prefix:
 // - Netlify Functions (serverless): prefer root paths to avoid double /api
@@ -39,6 +58,15 @@ app.use(cors({
 
 app.use(bodyParser.json({ limit: '5mb' }));
 app.use(bodyParser.urlencoded({ extended: true }));
+app.use(withRequestContext);
+
+const writeLimiter = createRateLimiter({ windowMs: 60 * 1000, max: 120 });
+app.use((req, res, next) => {
+  if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method)) {
+    return writeLimiter(req, res, next);
+  }
+  return next();
+});
 
 // Routes
 app.use(`${apiBase}/admin`, adminRoutes);
@@ -46,8 +74,17 @@ app.use(`${apiBase}/admin`, adminExtendedRoutes); // Extended admin routes
 app.use(`${apiBase}/auth`, authRoutes);
 app.use(`${apiBase}/employee`, employeeRoutes);
 app.use(`${apiBase}/manager`, managerRoutes);
+app.use(`${apiBase}/system`, systemRoutes);
 
-app.get('/health', (req, res) => res.json({ status: 'ok', dialect: process.env.DB_DIALECT || 'mssql' }));
+app.get('/health', async (req, res) => {
+  await initDbRouter();
+  const state = getRouterState();
+  res.json({ status: 'ok', active_database: state.active || 'none', degraded: state.degraded || false });
+});
+
+initDbRouter().catch((err) => {
+  console.error('Database router initialization failed:', err.message || err);
+});
 
 if (require.main === module) {
   const port = process.env.PORT || 4000;

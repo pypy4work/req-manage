@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect } from 'react';
-import { User, ProfileFieldConfig } from '../../types';
+import { User, ProfileFieldConfig, CareerHistory } from '../../types';
 import { api } from '../../services/api';
 import { Card, CardContent, Button } from '../ui/UIComponents';
 import { X, User as UserIcon, Building, Briefcase, Phone, DollarSign, Calendar, MapPin } from 'lucide-react';
@@ -11,22 +11,63 @@ interface Props {
     onClose: () => void;
 }
 
+const buildUnitHistory = (history: CareerHistory[], user: User) => {
+    const sorted = [...history].sort((a, b) => {
+        const da = new Date(a.change_date).getTime();
+        const db = new Date(b.change_date).getTime();
+        return da - db;
+    });
+
+    const items: { unit: string; date?: string; reason?: string }[] = [];
+
+    if (sorted.length > 0) {
+        const first = sorted[0];
+        if (first.prev_dept) {
+            items.push({ unit: first.prev_dept, date: user.join_date || first.change_date, reason: first.reason });
+        }
+        sorted.forEach(h => {
+            if (h.new_dept) items.push({ unit: h.new_dept, date: h.change_date, reason: h.reason });
+        });
+    } else if (user.org_unit_name) {
+        items.push({ unit: user.org_unit_name, date: user.join_date });
+    }
+
+    if (user.org_unit_name && !items.some(i => i.unit === user.org_unit_name)) {
+        items.push({ unit: user.org_unit_name, date: user.join_date });
+    }
+
+    const seen = new Set<string>();
+    return items.filter(i => {
+        const key = `${i.unit}|${i.date || ''}`;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+    });
+};
+
 export const UserProfileModal: React.FC<Props> = ({ user, onClose }) => {
     const [config, setConfig] = useState<ProfileFieldConfig[]>([]);
     const [isLoading, setIsLoading] = useState(true);
+    const [careerHistory, setCareerHistory] = useState<CareerHistory[]>([]);
     const { language } = useLanguage();
 
     useEffect(() => {
         if (user) {
             setIsLoading(true);
-            api.manager.getProfileViewConfig().then((data) => {
-                setConfig(data);
+            Promise.all([
+                api.manager.getProfileViewConfig(),
+                api.manager.getCareerHistory(user.user_id)
+            ]).then(([cfg, history]) => {
+                setConfig(cfg);
+                setCareerHistory(history || []);
+            }).finally(() => {
                 setIsLoading(false);
             });
         }
     }, [user]);
 
     if (!user) return null;
+    const unitHistory = buildUnitHistory(careerHistory, user);
 
     // Check if image is allowed to be viewed
     const imageConfig = config.find(c => c.id === 'picture_url');
@@ -34,6 +75,35 @@ export const UserProfileModal: React.FC<Props> = ({ user, onClose }) => {
 
     const renderField = (field: ProfileFieldConfig) => {
         if (!field.isVisible || field.id === 'picture_url') return null; // Skip image here, rendered in header
+
+        if (field.id === 'org_units_history') {
+            if (unitHistory.length === 0) return null;
+            return (
+                <div key={field.id} className="p-4 bg-[var(--bg-body)] rounded-xl border border-[var(--border-color)] flex items-start gap-4 md:col-span-2">
+                    <div className="p-2.5 bg-white dark:bg-slate-800 rounded-lg shadow-sm text-[var(--primary)] shrink-0">
+                        <Building className="w-5 h-5" />
+                    </div>
+                    <div className="w-full">
+                        <div className="text-xs font-bold text-[var(--text-muted)] uppercase tracking-wide mb-2">
+                            {language === 'ar' ? field.label_ar : field.label_en}
+                        </div>
+                        <ol className="list-decimal list-inside space-y-2 text-sm text-[var(--text-secondary)]">
+                            {unitHistory.map((entry, idx) => (
+                                <li key={`${entry.unit}-${idx}`} className="flex flex-col gap-1">
+                                    <span className="font-medium text-[var(--text-main)]">{entry.unit}</span>
+                                    <span className="text-[11px] text-[var(--text-muted)]">
+                                        تاريخ الإلتحاق: {entry.date ? new Date(entry.date).toLocaleDateString('ar-EG') : '—'}
+                                    </span>
+                                    {entry.reason && (
+                                        <span className="text-[11px] text-[var(--text-muted)]">سبب التغيير: {entry.reason}</span>
+                                    )}
+                                </li>
+                            ))}
+                        </ol>
+                    </div>
+                </div>
+            );
+        }
         
         // @ts-ignore - Dynamic access to user object based on ID
         let value = user[field.id];

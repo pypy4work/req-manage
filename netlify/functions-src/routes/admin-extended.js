@@ -1,12 +1,61 @@
 const express = require('express');
 const router = express.Router();
-const { query, DIALECT, insertAndGetId, withTransaction } = require('../db');
+const { query, getDialect, insertAndGetId, withTransaction } = require('../services/db-service');
+const { requirePermission } = require('../rbac');
+const { requireSupabaseActive } = require('../db-guards');
+const SAFE_TABLE_RE = /^[a-zA-Z0-9_]+$/;
+
+const DEFAULT_SETTINGS = {
+  setting_id: 1,
+  mode_type: 'Manual',
+  n8n_webhook_url: '',
+  system_title: 'SCA Requests',
+  system_subtitle: 'Suez Canal Authority',
+  system_logo_url: '',
+  logo_source: 'url',
+  sidebar_pattern_style: 'stars',
+  updated_at: new Date().toISOString(),
+  db_config: { connection_type: 'postgres', is_connected: true }
+};
+
+const parseSettingsJson = (raw) => {
+  if (!raw) return null;
+  if (typeof raw === 'object') return raw;
+  try { return JSON.parse(raw); } catch { return null; }
+};
+
+const getN8nConfig = async () => {
+  const envUrl = process.env.N8N_WEBHOOK_URL || process.env.N8N_WEBHOOK || '';
+  const envMode = process.env.MODE_TYPE || process.env.N8N_MODE || '';
+  try {
+    const rows = await query('SELECT settings_json FROM sca.system_settings WHERE setting_id = 1');
+    const settings = parseSettingsJson(rows?.[0]?.settings_json);
+    return {
+      url: (settings?.n8n_webhook_url || envUrl || '').trim(),
+      mode: settings?.mode_type || envMode
+    };
+  } catch {
+    return { url: envUrl, mode: envMode };
+  }
+};
+
+const sendToN8nWebhook = async (url, payload) => {
+  if (!url) return null;
+  const resp = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-Source': 'SCA_Request_Management' },
+    body: JSON.stringify(payload)
+  });
+  const text = await resp.text();
+  if (!text) return { success: resp.ok };
+  try { return JSON.parse(text); } catch { return { success: resp.ok, message: text.slice(0, 200) }; }
+};
 
 // Import existing admin module for lists
 const existingAdminRoutes = require('./admin');
 
 // GET /api/admin/users
-router.get('/users', async (req, res) => {
+router.get('/users', requirePermission('admin:users'), async (req, res) => {
   try {
     const rows = await query('SELECT user_id, full_name, username, email, role, org_unit_id, job_id, grade_id, salary FROM sca.users ORDER BY full_name');
     res.json(rows || []);
@@ -14,7 +63,7 @@ router.get('/users', async (req, res) => {
 });
 
 // GET /api/admin/org-units
-router.get('/org-units', async (req, res) => {
+router.get('/org-units', requirePermission('admin:org-structure'), async (req, res) => {
   try {
     const rows = await query('SELECT unit_id, unit_name, unit_type_id, parent_unit_id, manager_id FROM sca.organizational_units ORDER BY unit_name');
     res.json(rows || []);
@@ -22,32 +71,124 @@ router.get('/org-units', async (req, res) => {
 });
 
 // GET /api/admin/request-types
-router.get('/request-types', async (req, res) => {
+router.get('/request-types', requirePermission('admin:request-types'), async (req, res) => {
   try {
-    const rows = await query('SELECT id, name, description, category, unit, fields, is_transfer_type, transfer_config FROM sca.request_types ORDER BY name');
+    const rows = await query('SELECT id, name, description, category, unit, info_bar_content, fields, is_transfer_type, transfer_config FROM sca.request_types ORDER BY name');
+    res.json(rows || []);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// GET /api/admin/settings
+router.get('/settings', requirePermission('admin:settings'), async (req, res) => {
+  try {
+    const rows = await query('SELECT settings_json FROM sca.system_settings WHERE setting_id = 1');
+    if (!rows || rows.length === 0) return res.json(DEFAULT_SETTINGS);
+    const settings = parseSettingsJson(rows[0].settings_json) || DEFAULT_SETTINGS;
+    res.json(settings);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// PUT /api/admin/settings
+router.put('/settings', requirePermission('admin:settings'), async (req, res) => {
+  try {
+    const payload = req.body || {};
+    const settingsJson = JSON.stringify(payload);
+    const nowFunc = getDialect() === 'postgres' ? 'NOW()' : 'SYSUTCDATETIME()';
+    if (getDialect() === 'postgres') {
+      await query(
+        `INSERT INTO sca.system_settings (setting_id, settings_json, updated_at)
+         VALUES (1, @SettingsJson, ${nowFunc})
+         ON CONFLICT (setting_id) DO UPDATE
+         SET settings_json = EXCLUDED.settings_json, updated_at = EXCLUDED.updated_at`,
+        { SettingsJson: settingsJson }
+      );
+    } else {
+      await query(
+        `IF EXISTS (SELECT 1 FROM sca.system_settings WHERE setting_id = 1)
+           UPDATE sca.system_settings SET settings_json = @SettingsJson, updated_at = ${nowFunc} WHERE setting_id = 1
+         ELSE
+           INSERT INTO sca.system_settings (setting_id, settings_json, updated_at) VALUES (1, @SettingsJson, ${nowFunc})`,
+        { SettingsJson: settingsJson }
+      );
+    }
+    res.json({ success: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// POST /api/admin/test-db
+router.post('/test-db', requirePermission('admin:database'), async (req, res) => {
+  try {
+    await query('SELECT 1');
+    res.json({ success: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// POST /api/admin/n8n-test
+router.post('/n8n-test', requirePermission('admin:settings'), async (req, res) => {
+  try {
+    const { url, mode } = await getN8nConfig();
+    if (!url) return res.status(400).json({ success: false, message: 'N8N webhook URL not configured.' });
+    if (String(mode).toLowerCase() !== 'n8n') {
+      return res.status(400).json({ success: false, message: 'System mode is not N8N.' });
+    }
+    const payload = {
+      meta: { timestamp: new Date().toISOString(), source_system: 'SCA_Request_Management', event_type: 'n8n_test' },
+      test: true,
+      message: 'N8N connectivity test from SCA Requests'
+    };
+    const result = await sendToN8nWebhook(url, payload);
+    res.json({ success: true, response: result });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// GET /api/admin/db/tables
+router.get('/db/tables', requirePermission('admin:database'), requireSupabaseActive(), async (req, res) => {
+  try {
+    const rows = await query(
+      `SELECT table_name
+       FROM information_schema.tables
+       WHERE table_schema = 'sca' AND table_type = 'BASE TABLE'
+       ORDER BY table_name`
+    );
+    res.json((rows || []).map(r => r.table_name));
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// GET /api/admin/db/table/:name
+router.get('/db/table/:name', requirePermission('admin:database'), requireSupabaseActive(), async (req, res) => {
+  try {
+    const name = req.params.name;
+    if (!SAFE_TABLE_RE.test(name)) {
+      return res.status(400).json({ error: 'Invalid table name' });
+    }
+    const limitPrefix = getDialect() === 'postgres' ? '' : 'TOP 200';
+    const limitSuffix = getDialect() === 'postgres' ? 'LIMIT 200' : '';
+    const rows = await query(`SELECT ${limitPrefix} * FROM sca.${name} ${limitSuffix}`);
     res.json(rows || []);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 // POST /api/admin/request-types (create or update)
-router.post('/request-types', async (req, res) => {
+router.post('/request-types', requirePermission('admin:request-types'), async (req, res) => {
   try {
     const def = req.body || {};
 
-    const fieldsJson = DIALECT === 'postgres' 
+    const fieldsJson = getDialect() === 'postgres' 
       ? JSON.stringify(def.fields || [])
       : JSON.stringify(def.fields || []);
     const transferConfigJson = def.transfer_config ? JSON.stringify(def.transfer_config) : null;
-    const isTransferBool = def.is_transfer_type ? (DIALECT === 'postgres' ? true : 1) : (DIALECT === 'postgres' ? false : 0);
+    const isTransferBool = def.is_transfer_type ? (getDialect() === 'postgres' ? true : 1) : (getDialect() === 'postgres' ? false : 0);
+    const infoBarContent = def.info_bar_content || null;
 
     if (!def.id || Number(def.id) === 0) {
-      const sqlText = `INSERT INTO sca.request_types (name, description, category, unit, fields, is_transfer_type, transfer_config)
-        VALUES (@Name, @Description, @Category, @Unit, @Fields, @IsTransfer, @TransferConfig)`;
+      const sqlText = `INSERT INTO sca.request_types (name, description, category, unit, info_bar_content, fields, is_transfer_type, transfer_config)
+        VALUES (@Name, @Description, @Category, @Unit, @InfoBarContent, @Fields, @IsTransfer, @TransferConfig)`;
       const newId = await insertAndGetId(sqlText, {
         Name: def.name,
         Description: def.description || null,
         Category: def.category || null,
         Unit: def.unit || null,
+        InfoBarContent: infoBarContent,
         Fields: fieldsJson,
         IsTransfer: isTransferBool,
         TransferConfig: transferConfigJson
@@ -61,6 +202,7 @@ router.post('/request-types', async (req, res) => {
            description = @Description,
            category = @Category,
            unit = @Unit,
+           info_bar_content = @InfoBarContent,
            fields = @Fields,
            is_transfer_type = @IsTransfer,
            transfer_config = @TransferConfig
@@ -71,6 +213,7 @@ router.post('/request-types', async (req, res) => {
         Description: def.description || null,
         Category: def.category || null,
         Unit: def.unit || null,
+        InfoBarContent: infoBarContent,
         Fields: fieldsJson,
         IsTransfer: isTransferBool,
         TransferConfig: transferConfigJson
@@ -81,7 +224,7 @@ router.post('/request-types', async (req, res) => {
 });
 
 // DELETE /api/admin/request-types/:id
-router.delete('/request-types/:id', async (req, res) => {
+router.delete('/request-types/:id', requirePermission('admin:request-types'), async (req, res) => {
   try {
     const id = Number(req.params.id);
     await query('DELETE FROM sca.request_types WHERE id = @Id', { Id: id });
@@ -90,7 +233,7 @@ router.delete('/request-types/:id', async (req, res) => {
 });
 
 // GET /api/admin/job-titles
-router.get('/job-titles', async (req, res) => {
+router.get('/job-titles', requirePermission('admin:org-structure'), async (req, res) => {
   try {
     const rows = await query('SELECT job_id, job_title_ar, job_title_en FROM sca.job_titles ORDER BY job_title_ar');
     res.json(rows || []);
@@ -98,7 +241,7 @@ router.get('/job-titles', async (req, res) => {
 });
 
 // GET /api/admin/job-grades
-router.get('/job-grades', async (req, res) => {
+router.get('/job-grades', requirePermission('admin:org-structure'), async (req, res) => {
   try {
     const rows = await query('SELECT grade_id, grade_code, grade_name, min_salary, max_salary FROM sca.job_grades ORDER BY grade_id');
     res.json(rows || []);
@@ -106,7 +249,7 @@ router.get('/job-grades', async (req, res) => {
 });
 
 // POST /api/admin/users
-router.post('/users', async (req, res) => {
+router.post('/users', requirePermission('admin:users'), async (req, res) => {
   try {
     const { full_name, username, email, role, org_unit_id } = req.body;
     const sqlText = 'INSERT INTO sca.users (full_name, username, email, role, org_unit_id) VALUES (@FullName, @Username, @Email, @Role, @OrgUnitId)';
@@ -122,7 +265,7 @@ router.post('/users', async (req, res) => {
 });
 
 // Delete user
-router.delete('/users/:id', async (req, res) => {
+router.delete('/users/:id', requirePermission('admin:users'), async (req, res) => {
   try {
     const id = Number(req.params.id);
     await query('DELETE FROM sca.users WHERE user_id = @Id', { Id: id });
@@ -131,7 +274,7 @@ router.delete('/users/:id', async (req, res) => {
 });
 
 // GET /api/admin/transfer-requests
-router.get('/transfer-requests', async (req, res) => {
+router.get('/transfer-requests', requirePermission('admin:transfers'), async (req, res) => {
   try {
     const status = req.query.status;
     const sqlText = status
@@ -150,15 +293,15 @@ router.get('/transfer-requests', async (req, res) => {
     if (transfers.length === 0) return res.json([]);
 
     const ids = transfers.map(t => t.transfer_id);
-    const placeholders = DIALECT === 'postgres' 
+    const placeholders = getDialect() === 'postgres' 
       ? ids.map((_, i) => `$${i + 1}`).join(',')
       : ids.join(',');
     
-    const prefsSql = DIALECT === 'postgres'
+    const prefsSql = getDialect() === 'postgres'
       ? `SELECT transfer_id, unit_id, preference_order, reason FROM sca.transfer_preferences WHERE transfer_id = ANY($1::bigint[]) ORDER BY preference_order`
       : `SELECT transfer_id, unit_id, preference_order, reason FROM sca.transfer_preferences WHERE transfer_id IN (${placeholders}) ORDER BY preference_order`;
     
-    const prefsParams = DIALECT === 'postgres' ? { '1': ids } : {};
+    const prefsParams = getDialect() === 'postgres' ? { '1': ids } : {};
     const prefs = await query(prefsSql, prefsParams);
 
     const prefMap = new Map();
@@ -175,7 +318,7 @@ router.get('/transfer-requests', async (req, res) => {
 });
 
 // GET /api/admin/transfer-stats
-router.get('/transfer-stats', async (req, res) => {
+router.get('/transfer-stats', requirePermission('admin:transfers'), async (req, res) => {
   try {
     const rows = await query(`
       SELECT
@@ -190,12 +333,12 @@ router.get('/transfer-stats', async (req, res) => {
 });
 
 // POST /api/admin/transfer-requests/:id/approve
-router.post('/transfer-requests/:id/approve', async (req, res) => {
+router.post('/transfer-requests/:id/approve', requirePermission('admin:transfers'), async (req, res) => {
   try {
     const transferId = Number(req.params.id);
     const { nextStatus } = req.body;
     const status = nextStatus || 'HR_APPROVED';
-    const nowFunc = DIALECT === 'postgres' ? 'NOW()' : 'GETDATE()';
+    const nowFunc = getDialect() === 'postgres' ? 'NOW()' : 'GETDATE()';
     
     await query(
       `UPDATE sca.transfer_requests SET status = @Status, decision_at = ${nowFunc}, decision_by = 'Human_Manager' WHERE transfer_id = @TransferId`,
@@ -206,11 +349,11 @@ router.post('/transfer-requests/:id/approve', async (req, res) => {
 });
 
 // POST /api/admin/transfer-requests/:id/reject
-router.post('/transfer-requests/:id/reject', async (req, res) => {
+router.post('/transfer-requests/:id/reject', requirePermission('admin:transfers'), async (req, res) => {
   try {
     const transferId = Number(req.params.id);
     const { reason } = req.body;
-    const nowFunc = DIALECT === 'postgres' ? 'NOW()' : 'GETDATE()';
+    const nowFunc = getDialect() === 'postgres' ? 'NOW()' : 'GETDATE()';
     
     await query(
       `UPDATE sca.transfer_requests SET status = 'REJECTED', rejection_reason = @Reason, decision_at = ${nowFunc}, decision_by = 'Human_Manager' WHERE transfer_id = @TransferId`,
@@ -221,7 +364,7 @@ router.post('/transfer-requests/:id/reject', async (req, res) => {
 });
 
 // POST /api/admin/transfer-requests/:id/status
-router.post('/transfer-requests/:id/status', async (req, res) => {
+router.post('/transfer-requests/:id/status', requirePermission('admin:transfers'), async (req, res) => {
   try {
     const transferId = Number(req.params.id);
     const { status } = req.body;
@@ -234,7 +377,7 @@ router.post('/transfer-requests/:id/status', async (req, res) => {
 });
 
 // GET /api/admin/permissions
-router.get('/permissions', async (req, res) => {
+router.get('/permissions', requirePermission('admin:permissions'), async (req, res) => {
   try {
     const rows = await query(`
       SELECT permission_key AS key, label, description, group_name AS group
@@ -246,7 +389,7 @@ router.get('/permissions', async (req, res) => {
 });
 
 // GET /api/admin/user-permissions/:userId
-router.get('/user-permissions/:userId', async (req, res) => {
+router.get('/user-permissions/:userId', requirePermission('admin:permissions'), async (req, res) => {
   try {
     const userId = Number(req.params.userId);
     const userRows = await query('SELECT role FROM sca.users WHERE user_id = @UserId', { UserId: userId });
@@ -265,7 +408,7 @@ router.get('/user-permissions/:userId', async (req, res) => {
 });
 
 // PUT /api/admin/user-permissions/:userId
-router.put('/user-permissions/:userId', async (req, res) => {
+router.put('/user-permissions/:userId', requirePermission('admin:permissions'), async (req, res) => {
   try {
     const userId = Number(req.params.userId);
     const permissions = Array.isArray(req.body.permissions) ? req.body.permissions : [];
@@ -273,7 +416,7 @@ router.put('/user-permissions/:userId', async (req, res) => {
     await withTransaction(async (tx) => {
       await tx.query('DELETE FROM sca.user_permissions WHERE user_id = @UserId', { UserId: userId });
       
-      const nowFunc = DIALECT === 'postgres' ? 'NOW()' : 'GETDATE()';
+      const nowFunc = getDialect() === 'postgres' ? 'NOW()' : 'GETDATE()';
       for (const key of permissions) {
         await tx.query(
           `INSERT INTO sca.user_permissions (user_id, permission_key, granted_at) VALUES (@UserId, @PermissionKey, ${nowFunc})`,

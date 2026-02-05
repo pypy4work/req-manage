@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const { query, DIALECT, sqlLimit } = require('../db');
+const { query, getDialect } = require('../services/db-service');
 
 // POST /api/auth/login
 router.post('/login', async (req, res) => {
@@ -9,8 +9,8 @@ router.post('/login', async (req, res) => {
     if (!identifier || !password) return res.status(400).json({ error: 'identifier and password required' });
 
     // SQL متوافق مع Postgres و MSSQL
-    const limitPrefix = DIALECT === 'postgres' ? '' : 'TOP 1';
-    const limitSuffix = DIALECT === 'postgres' ? 'LIMIT 1' : '';
+    const limitPrefix = getDialect() === 'postgres' ? '' : 'TOP 1';
+    const limitSuffix = getDialect() === 'postgres' ? 'LIMIT 1' : '';
     const sqlText = `SELECT ${limitPrefix} user_id, full_name, username, email, role, org_unit_id, job_id, grade_id, picture_url 
       FROM sca.users 
       WHERE username = @ident OR email = @ident OR national_id = @ident

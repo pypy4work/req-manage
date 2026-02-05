@@ -182,7 +182,7 @@ export const Login: React.FC<LoginProps> = ({ onLogin, onOpenTheme, settings }) 
 
       {/* 2. MAIN CARD - Ultra Glassmorphism */}
       <div className="w-full max-w-[420px] z-10 animate-in fade-in zoom-in-95 duration-700">
-        <div className="relative backdrop-blur-2xl bg-white/10 dark:bg-black/40 rounded-3xl shadow-[0_20px_60px_-15px_rgba(0,0,0,0.6)] border border-white/20 dark:border-white/10 overflow-hidden ring-1 ring-white/10">
+        <div className="relative backdrop-blur-2xl bg-white/10 dark:bg-black/40 rounded-3xl shadow-[0_14px_36px_-20px_rgba(0,0,0,0.45)] border border-white/20 dark:border-white/10 overflow-hidden ring-1 ring-white/10">
             
             {/* Top Gloss Highlight */}
             <div className="absolute top-0 inset-x-0 h-px bg-gradient-to-r from-transparent via-white/70 to-transparent opacity-60"></div>

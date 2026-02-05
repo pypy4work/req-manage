@@ -1,9 +1,10 @@
 const express = require('express');
 const router = express.Router();
-const { query, DIALECT, insertAndGetId } = require('../db');
+const { query, insertAndGetId } = require('../services/db-service');
+const { requirePermission } = require('../rbac');
 
 // GET /api/admin/lists - list all admin lists
-router.get('/lists', async (req, res) => {
+router.get('/lists', requirePermission('admin:request-types'), async (req, res) => {
   try {
     const rows = await query('SELECT list_id, list_name, description, created_at FROM sca.admin_lists ORDER BY list_name');
     res.json(rows);
@@ -11,7 +12,7 @@ router.get('/lists', async (req, res) => {
 });
 
 // GET /api/admin/lists/:name/items
-router.get('/lists/:name/items', async (req, res) => {
+router.get('/lists/:name/items', requirePermission('admin:request-types'), async (req, res) => {
   try {
     const name = req.params.name;
     const sqlText = `
@@ -26,7 +27,7 @@ router.get('/lists/:name/items', async (req, res) => {
 });
 
 // POST /api/admin/lists - create a list
-router.post('/lists', async (req, res) => {
+router.post('/lists', requirePermission('admin:request-types'), async (req, res) => {
   try {
     const { listName, description } = req.body;
     
@@ -52,7 +53,7 @@ router.post('/lists', async (req, res) => {
 });
 
 // POST /api/admin/lists/:name/items - add item
-router.post('/lists/:name/items', async (req, res) => {
+router.post('/lists/:name/items', requirePermission('admin:request-types'), async (req, res) => {
   try {
     const name = req.params.name;
     const { label, value, meta } = req.body;
@@ -82,7 +83,7 @@ router.post('/lists/:name/items', async (req, res) => {
 });
 
 // PUT /api/admin/items/:id
-router.put('/items/:id', async (req, res) => {
+router.put('/items/:id', requirePermission('admin:request-types'), async (req, res) => {
   try {
     const id = Number(req.params.id);
     const { label, value, meta } = req.body;
@@ -99,7 +100,7 @@ router.put('/items/:id', async (req, res) => {
 });
 
 // DELETE /api/admin/items/:id
-router.delete('/items/:id', async (req, res) => {
+router.delete('/items/:id', requirePermission('admin:request-types'), async (req, res) => {
   try {
     const id = Number(req.params.id);
     await query('DELETE FROM sca.admin_list_items WHERE item_id = @ItemId', { ItemId: id });

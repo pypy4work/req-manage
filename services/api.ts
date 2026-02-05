@@ -9,6 +9,11 @@ const getTodayStr = () => new Date().toISOString().split('T')[0];
 const getYesterdayStr = () => { const d = new Date(); d.setDate(d.getDate() - 1); return d.toISOString().split('T')[0]; };
 const getPastDate = (days: number) => { const d = new Date(); d.setDate(d.getDate() - days); return d.toISOString().split('T')[0]; };
 
+const getDefaultDbConfig = (): DatabaseConfig => ({
+    connection_type: USE_BACKEND ? 'postgres' : 'local_mock',
+    is_connected: true
+});
+
 const DEFAULT_SETTINGS: SystemSettings = {
     setting_id: 1, 
     mode_type: ModeType.MANUAL, 
@@ -23,15 +28,28 @@ const DEFAULT_SETTINGS: SystemSettings = {
     enable_biometric_login: false,
     travel_api_provider: '',
     travel_api_url: '',
-    db_config: { connection_type: 'local_mock', is_connected: true }, 
+    db_config: getDefaultDbConfig(), 
     sidebar_pattern_style: 'stars',
     updated_at: new Date().toISOString()
+};
+
+const normalizeSettings = (raw?: Partial<SystemSettings>): SystemSettings => {
+    const base = DEFAULT_SETTINGS;
+    if (!raw) return base;
+    return {
+        ...base,
+        ...raw,
+        db_config: {
+            ...base.db_config,
+            ...(raw.db_config || {})
+        }
+    };
 };
 
 const loadSettingsFromStorage = (): SystemSettings => {
     try {
         const stored = localStorage.getItem('sca_system_settings');
-        return stored ? JSON.parse(stored) : DEFAULT_SETTINGS;
+        return stored ? normalizeSettings(JSON.parse(stored)) : DEFAULT_SETTINGS;
     } catch (e) {
         return DEFAULT_SETTINGS;
     }
@@ -39,7 +57,7 @@ const loadSettingsFromStorage = (): SystemSettings => {
 
 let db_settings: SystemSettings = loadSettingsFromStorage();
 
-const isRemoteConnection = () => db_settings.db_config?.connection_type !== 'local_mock';
+const isRemoteConnection = () => USE_BACKEND ? true : db_settings.db_config?.connection_type !== 'local_mock';
 const shouldUseBackend = () => USE_BACKEND && isRemoteConnection();
 
 /**
@@ -219,6 +237,12 @@ let db_request_types: RequestDefinition[] = [
     { 
         id: 20, name: 'طلب نقل داخلي', category: 'Administrative', unit: 'none',
         is_transfer_type: true,
+        info_bar_content: [
+            'ترتب الوحدات حسب أولويتك (الأولى = التفضيل الأول)',
+            'سيتم مراجعة طلبك من قبل مديرك والموارد البشرية',
+            'سيتم المطابقة العادلة بناءً على احتياجات الوحدات والأداء',
+            'ستتلقى إشعاراً بقرار التوزيع'
+        ].join('\n'),
         transfer_config: {
             preferred_units_field: {
                 enabled: true,
@@ -279,12 +303,21 @@ const PERMISSIONS_CATALOG: PermissionDefinition[] = [
     { key: 'admin:org-structure', label: 'الهيكل التنظيمي', description: 'إدارة الوحدات التنظيمية', group: 'الهيكل التنظيمي' },
     { key: 'admin:database', label: 'تحرير قاعدة البيانات', description: 'الوصول لإدارة الجداول والبيانات', group: 'قاعدة البيانات' },
     { key: 'admin:settings', label: 'إعدادات النظام', description: 'تعديل إعدادات النظام', group: 'النظام' },
-    { key: 'admin:permissions', label: 'إدارة الصلاحيات', description: 'تعيين صلاحيات المستخدمين', group: 'النظام' }
+    { key: 'admin:permissions', label: 'إدارة الصلاحيات', description: 'تعيين صلاحيات المستخدمين', group: 'النظام' },
+    { key: 'manager:home', label: 'الرئيسية', description: 'الوصول إلى الصفحة الرئيسية للمدير', group: 'لوحة المدير' },
+    { key: 'manager:my-requests', label: 'طلباتي', description: 'الوصول إلى طلبات المدير الشخصية', group: 'لوحة المدير' },
+    { key: 'manager:incoming', label: 'الطلبات الواردة', description: 'عرض الطلبات الواردة للمدير', group: 'لوحة المدير' },
+    { key: 'manager:kpis', label: 'مؤشرات الأداء', description: 'عرض مؤشرات الأداء للمدير', group: 'لوحة المدير' }
 ];
 
 const ROLE_DEFAULT_PERMISSIONS: Record<Role, PermissionKey[]> = {
     [Role.ADMIN]: PERMISSIONS_CATALOG.map(p => p.key),
-    [Role.MANAGER]: [],
+    [Role.MANAGER]: [
+        'manager:home',
+        'manager:my-requests',
+        'manager:incoming',
+        'manager:kpis'
+    ],
     [Role.EMPLOYEE]: []
 };
 
@@ -305,8 +338,11 @@ const savePermissionsToStorage = () => {
 
 const getEffectivePermissions = (userId: number, role?: Role): PermissionKey[] => {
     const base = role ? (ROLE_DEFAULT_PERMISSIONS[role] || []) : [];
-    const userPerms = db_user_permissions[String(userId)] || [];
-    return Array.from(new Set([...base, ...userPerms]));
+    const explicitPerms = db_user_permissions[String(userId)];
+    if (explicitPerms !== undefined) {
+        return explicitPerms;
+    }
+    return Array.from(new Set([...base]));
 };
 let db_career_history: CareerHistory[] = [];
 let db_notifications: NotificationRecord[] = [];
@@ -319,6 +355,7 @@ let db_profile_settings: ProfileFieldConfig[] = [
     { id: 'national_id', label_ar: 'الرقم القومي', label_en: 'National ID', category: 'personal', isVisible: false, isSensitive: true },
     { id: 'job_title', label_ar: 'المسمى الوظيفي', label_en: 'Job Title', category: 'professional', isVisible: true, isSensitive: false },
     { id: 'org_unit_name', label_ar: 'الجهة الإدارية', label_en: 'Department', category: 'professional', isVisible: true, isSensitive: false },
+    { id: 'org_units_history', label_ar: 'الوحدات التي عمل بها', label_en: 'Units History', category: 'professional', isVisible: true, isSensitive: false },
     { id: 'salary', label_ar: 'الراتب الأساسي', label_en: 'Salary', category: 'financial', isVisible: false, isSensitive: true },
     { id: 'join_date', label_ar: 'تاريخ التعيين', label_en: 'Join Date', category: 'professional', isVisible: true, isSensitive: false },
     { id: 'phone_number', label_ar: 'رقم الهاتف', label_en: 'Phone', category: 'contact', isVisible: true, isSensitive: false },
@@ -579,11 +616,14 @@ export const api = {
   },
   
   employee: {
-      getBalances: async (employeeId?: number) => [
-          { balance_id: 1, request_type_id: 1, request_name: 'إجازة عارضة', remaining: 7, remaining_days: 7 },
-          { balance_id: 2, request_type_id: 2, request_name: 'إجازة إعتيادية', remaining: 21, remaining_days: 21 },
-          { balance_id: 3, request_type_id: 10, request_name: 'إذن شخصي', remaining: 15, remaining_days: 15 }
-      ],
+      getBalances: async (userId?: number) => {
+          if (shouldUseBackend()) return await api_backend.employee.getBalances(userId);
+          return [
+              { balance_id: 1, request_type_id: 1, request_name: 'إجازة عارضة', remaining: 7, remaining_days: 7, total_entitlement: 10, unit: 'days' },
+              { balance_id: 2, request_type_id: 2, request_name: 'إجازة إعتيادية', remaining: 21, remaining_days: 21, total_entitlement: 30, unit: 'days' },
+              { balance_id: 3, request_type_id: 10, request_name: 'إذن شخصي', remaining: 15, remaining_days: 15, total_entitlement: 20, unit: 'hours' }
+          ];
+      },
       getRequestTypes: async () => {
           return db_request_types.map(rt => ({
               ...rt,
@@ -597,6 +637,11 @@ export const api = {
       getMyRequests: async (id: number) => {
           if (shouldUseBackend()) return await api_backend.employee.getMyRequests(id);
           return db_requests.filter(r => r.user_id === id);
+      },
+      getCareerHistory: async (userId: number) => {
+          if (shouldUseBackend() && api_backend.employee.getCareerHistory) return await api_backend.employee.getCareerHistory(userId);
+          await smartDelay();
+          return db_career_history.filter(h => h.user_id === userId);
       },
       
       submitRequest: async (req: any) => {
@@ -829,6 +874,11 @@ export const api = {
       },
       getProfileViewConfig: async () => { await smartDelay(); return db_profile_settings; },
       getUserDetails: async (nameOrId: string) => { await smartDelay(); return db_users.find(u => u.full_name === nameOrId) || null; },
+      getCareerHistory: async (userId: number) => {
+          if (shouldUseBackend() && api_backend.manager.getCareerHistory) return await api_backend.manager.getCareerHistory(userId);
+          await smartDelay();
+          return db_career_history.filter(h => h.user_id === userId);
+      },
       // Check if user's unit is a root unit (no parent)
       isRootUnit: async (userId: number) => {
           await smartDelay();
@@ -852,9 +902,27 @@ export const api = {
   },
 
   admin: {
-      getSettings: async () => { await smartDelay(200); return db_settings; },
-      updateSettings: async (settings: SystemSettings) => { await smartDelay(300); db_settings = settings; localStorage.setItem('sca_system_settings', JSON.stringify(db_settings)); },
-      testDatabaseConnection: async (config?: DatabaseConfig) => { await smartDelay(1000); return true; },
+      getSettings: async () => { 
+          if (shouldUseBackend()) return await api_backend.admin.getSettings();
+          await smartDelay(200); 
+          return db_settings; 
+      },
+      updateSettings: async (settings: SystemSettings) => { 
+          if (shouldUseBackend()) return await api_backend.admin.updateSettings(settings);
+          await smartDelay(300); 
+          db_settings = settings; 
+          localStorage.setItem('sca_system_settings', JSON.stringify(db_settings)); 
+      },
+      testDatabaseConnection: async (config?: DatabaseConfig) => { 
+          if (shouldUseBackend()) return await api_backend.admin.testDatabaseConnection(config);
+          await smartDelay(1000); 
+          return true; 
+      },
+      testN8nWebhook: async () => {
+          if (shouldUseBackend() && api_backend.admin.testN8nWebhook) return await api_backend.admin.testN8nWebhook();
+          const result = await sendToN8nWebhook({ test: true, message: 'N8N connectivity test from SCA Requests' });
+          return { success: !!result, response: result };
+      },
       getKPIs: async (scope: string): Promise<KPIStats> => {
           await smartDelay();
           return {
@@ -903,18 +971,24 @@ export const api = {
       saveRule: async (rule: ValidationRule) => rule,
       getAllDocs: async () => db_document_requirements,
       saveDoc: async (doc: DocumentRequirement) => {},
-      getDatabaseTables: async () => [
+      getDatabaseTables: async () => {
+          if (shouldUseBackend() && api_backend.admin.getDatabaseTables) return await api_backend.admin.getDatabaseTables();
+          return [
           'system_settings', 
           'profile_view_config', 
           'users', 'user_credentials', 'requests', 'request_approvals', 'career_history', 'notifications', 
           'organizational_units', 'organizational_unit_types', 'job_titles', 'job_grades', 
           'employment_types', 'employee_suffixes', 'request_types', 'request_statuses', 
           'system_roles', 'validation_rules', 'document_requirements',
+          'leave_balances',
           'transfer_requests', 'transfer_preferences', 'permissions', 'user_permissions',
           'allocation_criteria', 'allocation_history', 'unit_transfer_limits',
+          'governorates', 'cities', 'centers', 'villages', 'neighborhoods',
           ...Object.keys(db_custom_tables)
-      ],
+          ];
+      },
       getTableData: async (table: string) => {
+          if (shouldUseBackend() && api_backend.admin.getTableData) return await api_backend.admin.getTableData(table);
           await smartDelay(); // Simulate query time
           switch(table) {
               case 'system_settings': return [db_settings]; // Return as array for table view
@@ -936,6 +1010,7 @@ export const api = {
               case 'system_roles': return db_system_roles;
               case 'validation_rules': return db_validation_rules;
               case 'document_requirements': return db_document_requirements;
+              case 'leave_balances': return [];
               case 'transfer_requests': return db_requests.filter((r: any) => r.transfer_id != null);
               case 'transfer_preferences': return db_requests.filter((r: any) => r.transfer_id != null).flatMap((r: any) => (r.preferred_units || []).map((p: any, i: number) => ({ transfer_id: r.transfer_id, unit_id: p.unit_id, preference_order: p.preference_order ?? i + 1, reason: p.reason })));
               case 'permissions': return PERMISSIONS_CATALOG.map(p => ({ permission_key: p.key, label: p.label, description: p.description, group_name: p.group }));

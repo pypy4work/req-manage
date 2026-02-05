@@ -1,10 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { AllocationCriteria } from '../../types';
+import { AllocationCriteria, OrganizationalUnit, SystemSettings } from '../../types';
 import { api } from '../../services/api';
 import { Card, CardContent, CardHeader, CardTitle, Button, Input } from '../ui/UIComponents';
-import { Save, Edit2, AlertCircle, TrendingUp } from 'lucide-react';
+import { Save, Edit2, AlertCircle, TrendingUp, Building2 } from 'lucide-react';
 import { useNotification } from '../ui/NotificationSystem';
-import { useLanguage } from '../../contexts/LanguageContext';
 
 /**
  * نافذة إدارة معايير التوزيع العادل
@@ -12,10 +11,12 @@ import { useLanguage } from '../../contexts/LanguageContext';
  */
 export const AllocationCriteriaManagement: React.FC = () => {
   const { showNotification } = useNotification();
-  const { t } = useLanguage();
   const [criteria, setCriteria] = useState<AllocationCriteria[]>([]);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [settings, setSettings] = useState<SystemSettings | null>(null);
+  const [orgUnits, setOrgUnits] = useState<OrganizationalUnit[]>([]);
+  const [savingUnits, setSavingUnits] = useState(false);
   const [totalWeight, setTotalWeight] = useState(0);
   const [newName, setNewName] = useState('');
   const [newDescription, setNewDescription] = useState('');
@@ -24,6 +25,11 @@ export const AllocationCriteriaManagement: React.FC = () => {
 
   useEffect(() => {
     loadCriteria();
+  }, []);
+
+  useEffect(() => {
+    api.admin.getSettings().then(setSettings);
+    api.admin.getOrgUnits(false).then((u: any[]) => setOrgUnits(u || []));
   }, []);
 
   useEffect(() => {
@@ -87,6 +93,20 @@ export const AllocationCriteriaManagement: React.FC = () => {
     }
   };
 
+  const handleSaveTransferUnits = async () => {
+    if (!settings) return;
+    try {
+      setSavingUnits(true);
+      await api.admin.updateSettings(settings);
+      showNotification('تم حفظ إعدادات الوحدات بنجاح', 'success');
+    } catch (error) {
+      console.error('Failed to save transfer units', error);
+      showNotification('فشل حفظ إعدادات الوحدات', 'error');
+    } finally {
+      setSavingUnits(false);
+    }
+  };
+
   const normalizeWeights = () => {
     const activeCriteria = criteria.filter(c => c.is_active);
     const currentSum = activeCriteria.reduce((acc, c) => acc + c.weight, 0);
@@ -145,6 +165,50 @@ export const AllocationCriteriaManagement: React.FC = () => {
 
   return (
     <div className="space-y-6">
+      <Card className="border-t-4 border-t-emerald-500 shadow-lg">
+        <CardHeader className="bg-emerald-50/50 dark:bg-emerald-900/10">
+          <CardTitle className="flex items-center gap-2 text-emerald-700 dark:text-emerald-400">
+            <Building2 className="w-5 h-5" /> الوحدات المتاحة للنقل
+          </CardTitle>
+          <p className="text-xs text-[var(--text-muted)] mt-1">
+            حدد الوحدات الإدارية التي تظهر للموظف عند تقديم طلب النقل. إذا لم تختر أي وحدة، تظهر جميع الوحدات.
+          </p>
+        </CardHeader>
+        <CardContent className="pt-6">
+          {!settings ? (
+            <div className="text-sm text-[var(--text-muted)]">جاري تحميل إعدادات النقل...</div>
+          ) : (
+            <div className="space-y-4">
+              <div className="flex flex-wrap gap-3 max-h-48 overflow-y-auto custom-scrollbar p-2 border border-[var(--border-color)] rounded-lg bg-[var(--bg-body)]/50">
+                {orgUnits.map((u) => {
+                  const ids = settings?.transfer_eligible_unit_ids ?? [];
+                  const checked = ids.length === 0 || ids.includes(u.unit_id);
+                  const toggle = () => {
+                    if (!settings) return;
+                    const currentSet = ids.length === 0 ? orgUnits.map(x => x.unit_id) : ids;
+                    const next = checked
+                      ? currentSet.filter(id => id !== u.unit_id)
+                      : [...currentSet, u.unit_id];
+                    setSettings({ ...settings, transfer_eligible_unit_ids: next.length === 0 ? undefined : next });
+                  };
+                  return (
+                    <label key={u.unit_id} className="flex items-center gap-2 cursor-pointer px-3 py-2 rounded-lg border border-[var(--border-color)] hover:bg-[var(--bg-hover)] transition-colors">
+                      <input type="checkbox" checked={checked} onChange={toggle} className="rounded" />
+                      <span className="text-sm font-medium">{u.unit_name}</span>
+                    </label>
+                  );
+                })}
+              </div>
+              <div className="flex justify-end">
+                <Button size="sm" onClick={handleSaveTransferUnits} isLoading={savingUnits}>
+                  حفظ إعدادات الوحدات
+                </Button>
+              </div>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">

@@ -3,15 +3,13 @@ import React, { useState, useEffect } from 'react';
 import { User, LeaveBalance, LeaveRequest, RequestDefinition, RequestStatus } from '../types';
 import { api } from '../services/api';
 import { Card, CardContent, Button, Badge } from '../components/ui/UIComponents';
-import { Plus, Calendar, Watch, FileText, CheckCircle2, XCircle, Clock, Bot, UserCheck, ShieldAlert, Edit2, X, ExternalLink, Briefcase, AlertCircle } from 'lucide-react';
+import { Plus, Calendar, Watch, FileText, CheckCircle2, XCircle, Clock, Bot, UserCheck, ShieldAlert, Edit2, X, ExternalLink } from 'lucide-react';
 import { RequestForm } from '../components/employee/RequestForm';
-import { TransferForm } from '../components/employee/TransferForm';
-import { MyTransfers } from '../components/employee/MyTransfers';
 import { useLanguage } from '../contexts/LanguageContext';
 
 interface EmployeeDashboardProps {
   user: User;
-  view: 'home' | 'requests' | 'transfer-request' | 'transfer-history';
+  view: 'home' | 'requests';
 }
 
 export const EmployeeDashboard: React.FC<EmployeeDashboardProps> = ({ user, view }) => {
@@ -25,6 +23,20 @@ export const EmployeeDashboard: React.FC<EmployeeDashboardProps> = ({ user, view
   const [isEditing, setIsEditing] = useState(false);
 
   const { t, dir } = useLanguage();
+  const normalizedBalances = balances.map((b) => {
+      const name = b.leave_name || b.request_name || '';
+      const remaining = (b.remaining_days ?? b.remaining ?? 0) as number;
+      const total = (b.total_entitlement ?? b.remaining ?? 0) as number;
+      const unit = b.unit || (name.includes('إذن') ? 'hours' : 'days');
+      const percent = total > 0 ? Math.round((remaining / total) * 100) : 0;
+      return { ...b, name, remaining, total, unit, percent };
+  });
+  const sortedBalances = [...normalizedBalances].sort((a, b) => a.percent - b.percent);
+  const totalRemainingDays = normalizedBalances.filter(b => b.unit !== 'hours').reduce((sum, b) => sum + (b.remaining || 0), 0);
+  const totalEntitlementDays = normalizedBalances.filter(b => b.unit !== 'hours').reduce((sum, b) => sum + (b.total || 0), 0);
+  const totalRemainingHours = normalizedBalances.filter(b => b.unit === 'hours').reduce((sum, b) => sum + (b.remaining || 0), 0);
+  const totalEntitlementHours = normalizedBalances.filter(b => b.unit === 'hours').reduce((sum, b) => sum + (b.total || 0), 0);
+  const pendingCount = requests.filter(r => r.status === RequestStatus.PENDING || r.status === 'PENDING').length;
 
   useEffect(() => {
     fetchData();
@@ -32,7 +44,7 @@ export const EmployeeDashboard: React.FC<EmployeeDashboardProps> = ({ user, view
 
   const fetchData = async () => {
       const [bData, rData, tData] = await Promise.all([
-          api.employee.getBalances(user.employee_id), 
+          api.employee.getBalances(user.user_id || user.employee_id), 
           api.employee.getMyRequests(user.user_id), 
           api.employee.getRequestTypes()
       ]);
@@ -112,7 +124,10 @@ export const EmployeeDashboard: React.FC<EmployeeDashboardProps> = ({ user, view
                           const tr = selectedRequest as any;
                           const cd = tr.custom_data || {};
                           const reason = cd.reason_for_transfer ?? tr.reason_for_transfer;
-                          const prefs = cd.preferred_units ?? tr.preferred_units ?? [];
+                          const prefsRaw = cd.preferred_units ?? tr.preferred_units ?? [];
+                          const prefs = Array.isArray(prefsRaw)
+                              ? prefsRaw.filter((p: any) => p?.unit_id).sort((a: any, b: any) => (a.preference_order ?? 0) - (b.preference_order ?? 0))
+                              : [];
                           return (
                               <div className="space-y-4">
                                   {reason && (
@@ -121,12 +136,12 @@ export const EmployeeDashboard: React.FC<EmployeeDashboardProps> = ({ user, view
                                           <p className="text-sm text-[var(--text-secondary)] whitespace-pre-wrap">{reason}</p>
                                       </div>
                                   )}
-                                  {Array.isArray(prefs) && prefs.length > 0 && (
+                                  {prefs.length > 0 && (
                                       <div className="p-4 bg-[var(--bg-body)] rounded-xl border border-[var(--border-color)]">
                                           <h5 className="font-bold text-sm mb-2 text-[var(--text-main)]">الوحدات المفضلة (بالترتيب)</h5>
                                           <ol className="list-decimal list-inside space-y-1 text-sm text-[var(--text-secondary)]">
-                                              {prefs.filter((p: any) => p.unit_id).map((p: any, i: number) => (
-                                                  <li key={i}>{p.unit_name ?? `وحدة #${p.unit_id}`}</li>
+                                              {prefs.map((p: any, i: number) => (
+                                                  <li key={`${p.unit_id ?? 'unit'}-${i}`}>{p.unit_name || 'غير محددة'}</li>
                                               ))}
                                           </ol>
                                       </div>
@@ -187,44 +202,6 @@ export const EmployeeDashboard: React.FC<EmployeeDashboardProps> = ({ user, view
   
   if (isEditing && selectedRequest) {
       return <RequestForm user={user} requestTypes={requestTypes} initialData={selectedRequest} onSuccess={handleRequestSuccess} onCancel={() => { setIsEditing(false); setSelectedRequest(null); }} />;
-  }
-
-  if (view === 'transfer-request') {
-    // البحث عن نوع الطلب Transfer من أنواع الطلبات
-    const transferRequestType = requestTypes.find(rt => rt.is_transfer_type === true);
-    
-    if (!transferRequestType) {
-      return (
-        <div className="space-y-6">
-          <Card className="border-yellow-300 bg-yellow-50 dark:bg-yellow-900/20">
-            <CardContent className="pt-6">
-              <div className="flex items-start gap-3">
-                <AlertCircle className="w-6 h-6 text-yellow-600 flex-shrink-0 mt-0.5" />
-                <div>
-                  <h3 className="font-bold text-yellow-900 dark:text-yellow-200 mb-2">
-                    نوع طلب النقل غير متوفر
-                  </h3>
-                  <p className="text-sm text-yellow-800 dark:text-yellow-300">
-                    يرجى التواصل مع المسؤول لإنشاء نوع طلب "نقل وظيفي" في إعدادات أنواع الطلبات.
-                  </p>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-      );
-    }
-    
-    return <TransferForm 
-      employeeId={user.employee_id || user.user_id} 
-      templateId={transferRequestType.id}
-      requestDefinition={transferRequestType}
-      onSubmit={handleRequestSuccess}
-    />;
-  }
-
-  if (view === 'transfer-history') {
-    return <MyTransfers employeeId={user.employee_id || user.user_id} />;
   }
 
   if (view === 'requests') {
@@ -323,17 +300,70 @@ export const EmployeeDashboard: React.FC<EmployeeDashboardProps> = ({ user, view
               <span className="hidden md:inline">{t('newRequest')}</span>
           </Button>
       </div>
+
+      <Card className="border border-[var(--border-color)] bg-[var(--bg-card)]/70">
+          <CardContent className="p-4 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+              <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center border border-blue-100">
+                      <CheckCircle2 className="w-5 h-5" />
+                  </div>
+                  <div>
+                      <div className="text-xs text-[var(--text-muted)]">{t('remainingBalance')}</div>
+                      <div className="text-lg font-bold text-[var(--text-main)]">
+                          {totalRemainingDays}{totalEntitlementDays > 0 ? ` / ${totalEntitlementDays}` : ''} <span className="text-xs text-[var(--text-muted)]">{t('days')}</span>
+                          {totalRemainingHours > 0 && (
+                              <span className="text-xs text-[var(--text-muted)]">
+                                  {' '} • {totalRemainingHours}{totalEntitlementHours > 0 ? ` / ${totalEntitlementHours}` : ''} {t('hours')}
+                              </span>
+                          )}
+                      </div>
+                  </div>
+              </div>
+              <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center border border-amber-100">
+                      <Clock className="w-5 h-5" />
+                  </div>
+                  <div>
+                      <div className="text-xs text-[var(--text-muted)]">{t('status_Pending')}</div>
+                      <div className="text-lg font-bold text-[var(--text-main)]">{pendingCount}</div>
+                  </div>
+              </div>
+              <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center border border-emerald-100">
+                      <FileText className="w-5 h-5" />
+                  </div>
+                  <div>
+                      <div className="text-xs text-[var(--text-muted)]">{t('latestActivity')}</div>
+                      <div className="text-lg font-bold text-[var(--text-main)]">{requests.length}</div>
+                  </div>
+              </div>
+          </CardContent>
+      </Card>
       
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          {balances.map((b) => (
-              <Card key={b.balance_id} className="bg-white border-[var(--border-color)] shadow-sm hover:border-[var(--primary)] transition-colors group">
-                  <CardContent className="p-4 flex flex-col items-center text-center">
-                      <span className="text-[var(--text-secondary)] text-xs mb-1 font-semibold truncate w-full">{b.leave_name}</span>
-                      <span className="text-3xl font-bold text-[var(--primary)] group-hover:scale-110 transition-transform">{b.remaining_days}</span>
-                      <span className="text-xs text-[var(--text-muted)] mt-1">{t('remainingBalance')}</span>
-                  </CardContent>
-              </Card>
-          ))}
+          {sortedBalances.map((b) => {
+              const isLow = b.total > 0 && b.percent <= 20;
+              return (
+                  <Card key={b.balance_id} className={`bg-white border-[var(--border-color)] shadow-sm transition-colors group ${isLow ? 'border-red-300 bg-red-50/40' : 'hover:border-[var(--primary)]'}`}>
+                      <CardContent className="p-4 flex flex-col items-center text-center gap-2">
+                          <span className="text-[var(--text-secondary)] text-xs font-semibold truncate w-full">{b.name}</span>
+                          <div className="flex items-end gap-1">
+                              <span className="text-3xl font-bold text-[var(--primary)] group-hover:scale-110 transition-transform">{b.remaining}</span>
+                              <span className="text-xs text-[var(--text-muted)] mb-1">{b.unit === 'hours' ? t('hours') : t('days')}</span>
+                          </div>
+                          <div className="w-full h-2 rounded-full bg-[var(--bg-body)] border border-[var(--border-color)] overflow-hidden">
+                              <div
+                                  className={`h-full ${isLow ? 'bg-red-500' : 'bg-[var(--primary)]'}`}
+                                  style={{ width: `${Math.min(100, Math.max(0, b.percent))}%` }}
+                              />
+                          </div>
+                          <div className={`text-[10px] ${isLow ? 'text-red-600' : 'text-[var(--text-muted)]'}`}>
+                              {b.total > 0 ? `${b.remaining} / ${b.total}` : t('remainingBalance')}
+                          </div>
+                      </CardContent>
+                  </Card>
+              );
+          })}
       </div>
       
       <div>

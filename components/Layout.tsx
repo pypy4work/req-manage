@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { User, Role, SystemSettings, PermissionKey } from '../types';
-import { Menu, LogOut, Settings, Home, FileText, BarChart3, X, Users, Palette, FileCog, ChevronLeft, ChevronRight, Bell, UserCog, Database, FolderTree, ChevronsLeft, ChevronsRight, ScrollText, Briefcase, ArrowRightLeft, SlidersHorizontal, ShieldCheck } from 'lucide-react';
+import { Menu, LogOut, Settings, Home, FileText, BarChart3, X, Users, Palette, FileCog, ChevronLeft, ChevronRight, Bell, UserCog, Database, FolderTree, ChevronsLeft, ChevronsRight, ScrollText, ArrowRightLeft, SlidersHorizontal, ShieldCheck, Inbox } from 'lucide-react';
 import { useLanguage } from '../contexts/LanguageContext';
 import { CosmicBackground } from './ui/CosmicBackground';
 import { api } from '../services/api';
@@ -63,6 +63,7 @@ export const Layout: React.FC<LayoutProps> = ({ user, currentRoute, onLogout, on
   const hasPermission = (perm: PermissionKey) => permissions.includes(perm);
   const adminNavItems = [
       { icon: BarChart3, label: t('dashboard') || 'Dashboard', href: '#/', permission: 'admin:overview' as PermissionKey },
+      { icon: BarChart3, label: t('stats') || 'Statistics', href: '#/stats', permission: 'admin:stats' as PermissionKey },
       { icon: ArrowRightLeft, label: 'Transfers', href: '#/transfers', permission: 'admin:transfers' as PermissionKey },
       { icon: SlidersHorizontal, label: 'Allocation Criteria', href: '#/allocation-criteria', permission: 'admin:allocation-criteria' as PermissionKey },
       { icon: FolderTree, label: t('orgStructure'), href: '#/org-structure', permission: 'admin:org-structure' as PermissionKey },
@@ -73,21 +74,20 @@ export const Layout: React.FC<LayoutProps> = ({ user, currentRoute, onLogout, on
       { icon: Settings, label: t('settings'), href: '#/settings', permission: 'admin:settings' as PermissionKey }
   ];
 
+  const managerNavItems = [
+      { icon: Home, label: t('home'), href: '#/', permission: 'manager:home' as PermissionKey },
+      { icon: FileText, label: t('myRequests'), href: '#/my-requests', permission: 'manager:my-requests' as PermissionKey },
+      { icon: Inbox, label: t('incomingRequests'), href: '#/approvals', permission: 'manager:incoming' as PermissionKey },
+      { icon: BarChart3, label: t('performanceIndicators'), href: '#/kpis', permission: 'manager:kpis' as PermissionKey }
+  ];
+
   const navItems = {
     [Role.EMPLOYEE]: [
       { icon: Home, label: t('home'), href: '#/' },
       { icon: FileText, label: t('myRequests'), href: '#/requests' },
-      { icon: Briefcase, label: 'Transfer Request', href: '#/transfer-request' },
-      { icon: ArrowRightLeft, label: 'My Transfers', href: '#/transfer-history' },
       ...adminNavItems.filter(i => hasPermission(i.permission))
     ],
-    [Role.MANAGER]: [
-      { icon: Home, label: t('dashboard'), href: '#/' },
-      { icon: FileText, label: t('incomingRequests'), href: '#/approvals' },
-      // "My Requests" only visible for non-root unit managers
-      ...(isRootAdmin ? [] : [{ icon: FileText, label: t('myRequests'), href: '#/my-requests' }]),
-      ...adminNavItems.filter(i => hasPermission(i.permission))
-    ],
+    [Role.MANAGER]: managerNavItems.filter(i => hasPermission(i.permission)),
     [Role.ADMIN]: [
       // "My Requests" only visible for non-root admins (enforced in code below)
       ...(isRootAdmin ? [] : [{ icon: ScrollText, label: 'My Requests', href: '#/my-requests' }]),

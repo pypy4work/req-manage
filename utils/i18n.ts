@@ -102,6 +102,7 @@ export const translations = {
     home: 'الرئيسية',
     myRequests: 'طلباتي',
     incomingRequests: 'الطلبات الواردة',
+    performanceIndicators: 'مؤشرات الأداء',
     attendanceStats: 'مؤشرات الحضور',
     
     // KPI Cards - Improved Labels
@@ -151,7 +152,6 @@ export const translations = {
     status_Rejected: 'مرفوض',
     submitSuccess: 'تم إرسال الطلب بنجاح',
     submitRejected: 'تم رفض الطلب بناءً على قواعد النظام',
-    autoCheckNotice: 'سيقوم النظام بفحص الطلب آلياً ومقارنته بالرصيد وسياسات الموارد البشرية.',
     
     // Admin & Settings
     adminDashboard: 'لوحة التحكم',
@@ -241,6 +241,11 @@ export const translations = {
     // Misc
     theme: 'المظهر',
     themeSettings: 'تخصيص المظهر',
+    colorPanel: 'لوحة الألوان',
+    surfaceGlass: 'زجاجي',
+    surfaceSolid: 'صلب',
+    surfacePaper: 'ورقي',
+    uiPreview: 'معاينة الواجهة',
     language: 'اللغة',
     lightMode: 'فاتح',
     darkMode: 'داكن',
@@ -358,6 +363,7 @@ export const translations = {
     home: 'Home',
     myRequests: 'My Requests',
     incomingRequests: 'Incoming Requests',
+    performanceIndicators: 'Performance Indicators',
     attendanceStats: 'Attendance Indicators',
     
     // KPI Cards - Improved Labels
@@ -407,7 +413,6 @@ export const translations = {
     status_Rejected: 'Rejected',
     submitSuccess: 'Request submitted successfully',
     submitRejected: 'Request rejected by system rules',
-    autoCheckNotice: 'System will auto-check balance and policies.',
     
     // Admin
     adminDashboard: 'Admin Dashboard',
@@ -497,6 +502,11 @@ export const translations = {
     // Misc
     theme: 'Theme',
     themeSettings: 'Theme Settings',
+    colorPanel: 'Color Panel',
+    surfaceGlass: 'Glass',
+    surfaceSolid: 'Solid',
+    surfacePaper: 'Paper',
+    uiPreview: 'UI Preview',
     language: 'Language',
     lightMode: 'Light',
     darkMode: 'Dark',

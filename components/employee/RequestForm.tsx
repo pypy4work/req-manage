@@ -74,12 +74,12 @@ interface Props {
         <div className="flex-shrink-0 font-bold text-lg text-purple-600 w-8 h-8 flex items-center justify-center bg-purple-50 dark:bg-purple-900/30 rounded-full">
           {preference.preference_order}
         </div>
-        <select
-          value={preference.unit_id}
-          onChange={(e) => onUpdate(index, 'unit_id', parseInt(e.target.value))}
-          className="flex-1 p-2 border rounded-md bg-white dark:bg-slate-700"
-          required={required}
-        >
+      <select
+        value={preference.unit_id}
+        onChange={(e) => onUpdate(index, 'unit_id', parseInt(e.target.value))}
+        className="flex-1 p-2 border rounded-md bg-white dark:bg-slate-700 text-[var(--text-main)]"
+        required={required}
+      >
           <option value={0}>-- اختر وحدة --</option>
           {units
             .filter(u => !allPreferences.some((p, i) => i !== index && p.unit_id === u.unit_id))
@@ -135,6 +135,11 @@ export const RequestForm: React.FC<Props> = ({ user, requestTypes, onSuccess, on
   const isTransferType = currentType?.is_transfer_type === true;
   const transferFieldIds = new Set(['reason_for_transfer', 'willing_to_relocate', 'desired_start_date', 'additional_notes']);
   const hasTransferFieldsInConfig = isTransferType && (currentType?.fields || []).some(f => transferFieldIds.has(f.id));
+  const infoBarItems = (currentType?.info_bar_content || '')
+    .split('\n')
+    .map(line => line.trim())
+    .filter(Boolean);
+  const SELECT_BASE_CLASS = "w-full rounded-md border border-[var(--border-color)] bg-[var(--bg-card)] px-2 py-1 text-[var(--text-main)] focus:outline-none focus:ring-2 focus:ring-[var(--primary)]/30";
   
   // Drag and drop sensors for transfer preferences
   const sensors = useSensors(
@@ -517,11 +522,11 @@ export const RequestForm: React.FC<Props> = ({ user, requestTypes, onSuccess, on
               if (cfg?.source === 'ORG_UNITS' && cfg.hierarchical) {
                   return (
                       <div className="space-y-2">
-                          <select className="w-full rounded-md border px-2 py-1" value={selectedParent || ''} onChange={e => setSelectedParent(Number(e.target.value) || null)}>
+                          <select className={SELECT_BASE_CLASS} value={selectedParent || ''} onChange={e => setSelectedParent(Number(e.target.value) || null)}>
                               <option value="">-- اختر القسم الأعلى --</option>
                               {parentOptions.map(p => <option key={p.unit_id} value={p.unit_id}>{p.unit_name}</option>)}
                           </select>
-                          <select className="w-full rounded-md border px-2 py-1" value={customData[field.id] || ''} onChange={e => handleSingleChange(e.target.value)}>
+                          <select className={SELECT_BASE_CLASS} value={customData[field.id] || ''} onChange={e => handleSingleChange(e.target.value)}>
                               <option value="">-- اختر الوحدة الفرعية --</option>
                               {childOptions.map(c => <option key={c.unit_id} value={c.unit_id}>{c.unit_name}</option>)}
                           </select>
@@ -533,7 +538,7 @@ export const RequestForm: React.FC<Props> = ({ user, requestTypes, onSuccess, on
               if (cfg?.allowMultiple) {
                   const opts = options.map(o => ({ label: cfg.displayField ? o[cfg.displayField] : (o.label || o.unit_name || String(o)), value: cfg.valueField ? o[cfg.valueField] : (o.unit_id ?? o.id ?? o.value) }));
                   return (
-                      <select multiple className="w-full rounded-md border px-2 py-1" value={customData[field.id] || []} onChange={handleMultiChange}>
+                      <select multiple className={SELECT_BASE_CLASS} value={customData[field.id] || []} onChange={handleMultiChange}>
                           {opts.map((o, i) => <option key={i} value={o.value}>{o.label}</option>)}
                       </select>
                   );
@@ -542,7 +547,7 @@ export const RequestForm: React.FC<Props> = ({ user, requestTypes, onSuccess, on
               // Single select
               const opts = options.map(o => ({ label: cfg?.displayField ? o[cfg.displayField] : (o.label || o.unit_name || String(o)), value: cfg?.valueField ? o[cfg.valueField] : (o.unit_id ?? o.id ?? o.value) }));
               return (
-                  <select className="w-full rounded-md border px-2 py-1" value={customData[field.id] || ''} onChange={e => handleSingleChange(e.target.value)}>
+                  <select className={SELECT_BASE_CLASS} value={customData[field.id] || ''} onChange={e => handleSingleChange(e.target.value)}>
                       <option value="">-- اختر --</option>
                       {opts.map((o, i) => <option key={i} value={o.value}>{o.label}</option>)}
                   </select>
@@ -752,7 +757,7 @@ export const RequestForm: React.FC<Props> = ({ user, requestTypes, onSuccess, on
                                     <select
                                         value={pref.unit_id}
                                         onChange={(e) => handleUpdatePreference(index, 'unit_id', parseInt(e.target.value))}
-                                        className="flex-1 p-2 border rounded-md bg-white dark:bg-slate-700"
+                                        className="flex-1 p-2 border rounded-md bg-white dark:bg-slate-700 text-[var(--text-main)]"
                                         required={currentType.transfer_config?.preferred_units_field?.required}
                                     >
                                         <option value={0}>-- اختر وحدة --</option>
@@ -891,11 +896,20 @@ export const RequestForm: React.FC<Props> = ({ user, requestTypes, onSuccess, on
                 </div>
             )}
 
-            <div className="bg-white dark:bg-blue-900/20 p-4 rounded-lg border border-gray-300 dark:border-blue-900 flex gap-3 shadow-sm items-start mt-6">
-               <AlertCircle className="w-5 h-5 shrink-0 text-black dark:text-blue-500 mt-0.5" />
-               <p className="text-sm text-black dark:text-blue-700 font-medium">{t('autoCheckNotice')}</p>
-            </div>
-            
+            {infoBarItems.length > 0 && (
+                <div className="bg-blue-50 dark:bg-blue-900/20 p-4 rounded-lg border border-blue-200 dark:border-blue-800 flex gap-3 shadow-sm items-start mt-6">
+                    <AlertCircle className="w-5 h-5 shrink-0 text-blue-600 dark:text-blue-400 mt-0.5" />
+                    <div className="text-sm text-blue-900 dark:text-blue-100">
+                        <p className="font-medium mb-2">معلومات مهمة:</p>
+                        <ul className="list-disc list-inside space-y-1">
+                            {infoBarItems.map((item, idx) => (
+                                <li key={`${idx}-${item.slice(0, 20)}`}>{item}</li>
+                            ))}
+                        </ul>
+                    </div>
+                </div>
+            )}
+
             <Button type="submit" className="w-full shadow-lg h-12 text-base" isLoading={isSubmitting}>
                 {isEditMode ? t('saveChanges') : t('submitRequest')}
             </Button>

@@ -4,7 +4,7 @@ import { SystemSettings, ModeType, DatabaseConfig, SidebarPattern, BackgroundAni
 import { api } from '../../services/api';
 import { Card, CardContent, CardHeader, CardTitle, Button, Input } from '../../components/ui/UIComponents';
 import { useNotification } from '../../components/ui/NotificationSystem';
-import { Save, Server, Palette, Image, Type, Link as LinkIcon, UploadCloud, CheckCircle2, Zap, Info, Database, HardDrive, Wifi, Lock, RefreshCw, CheckCircle, XCircle, Fingerprint, ScanFace, Activity, LayoutTemplate, Grid, Star, Cpu, Settings2, Command, PlayCircle, Wind, RotateCw, Pause, Rocket, Maximize, Disc, Shuffle, Globe, Atom, BoxSelect, Eraser, AlignLeft, MoveVertical, RotateCcw, Building2 } from 'lucide-react';
+import { Save, Server, Palette, Image, Type, Link as LinkIcon, UploadCloud, CheckCircle2, Zap, Info, Database, HardDrive, Wifi, Lock, RefreshCw, CheckCircle, XCircle, Fingerprint, ScanFace, Activity, LayoutTemplate, Grid, Star, Cpu, Settings2, Command, PlayCircle, Wind, RotateCw, Pause, Rocket, Maximize, Disc, Shuffle, Globe, Atom, BoxSelect, Eraser, AlignLeft, MoveVertical, RotateCcw } from 'lucide-react';
 import { useLanguage } from '../../contexts/LanguageContext';
 import { AuthDiagnostics } from './AuthDiagnostics';
 import { DataQualityMonitor } from './DataQualityMonitor';
@@ -19,16 +19,12 @@ export const SystemSettingsPanel: React.FC<Props> = ({ onSettingsChange }) => {
   const [settings, setSettings] = useState<SystemSettings | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [isTestingDB, setIsTestingDB] = useState(false);
-  const [orgUnits, setOrgUnits] = useState<{ unit_id: number; unit_name: string }[]>([]);
+  const [isTestingWebhook, setIsTestingWebhook] = useState(false);
   const { notify } = useNotification();
   const { t } = useLanguage();
 
   useEffect(() => {
     api.admin.getSettings().then(setSettings);
-  }, []);
-
-  useEffect(() => {
-    api.admin.getOrgUnits(false).then((u: any[]) => setOrgUnits(u || []));
   }, []);
 
   const handleSaveSettings = async () => {
@@ -108,6 +104,19 @@ export const SystemSettingsPanel: React.FC<Props> = ({ onSettingsChange }) => {
           notify({ type: 'error', title: t('connectionFailed'), message: 'Could not connect to the database. Check credentials.' });
       } finally {
           setIsTestingDB(false);
+      }
+  };
+
+  const handleTestWebhook = async () => {
+      if (!settings) return;
+      setIsTestingWebhook(true);
+      try {
+          const result = await api.admin.testN8nWebhook();
+          notify({ type: 'success', title: 'Success', message: result?.response?.message || 'N8N webhook is reachable.' });
+      } catch (error: any) {
+          notify({ type: 'error', title: 'Failed', message: error?.message || 'Could not reach N8N webhook.' });
+      } finally {
+          setIsTestingWebhook(false);
       }
   };
 
@@ -213,40 +222,6 @@ export const SystemSettingsPanel: React.FC<Props> = ({ onSettingsChange }) => {
                         <p className="text-sm text-[var(--text-muted)] mt-1">System is using static JSON data for demonstration purposes. No real database connection is active.</p>
                     </div>
                 )}
-            </CardContent>
-        </Card>
-
-        {/* SECTION: Transfer Eligible Units */}
-        <Card className="border-t-4 border-t-emerald-500 shadow-lg">
-            <CardHeader className="bg-emerald-50/50 dark:bg-emerald-900/10">
-                <CardTitle className="flex items-center gap-2 text-emerald-700 dark:text-emerald-400">
-                    <Building2 className="w-5 h-5" /> الوحدات المتاحة للنقل
-                </CardTitle>
-                <p className="text-xs text-[var(--text-muted)] mt-1">
-                    حدد الوحدات الإدارية التي تظهر للموظف عند تقديم طلب النقل. إذا لم تختر أي وحدة، تظهر جميع الوحدات.
-                </p>
-            </CardHeader>
-            <CardContent className="pt-6">
-                <div className="flex flex-wrap gap-3 max-h-48 overflow-y-auto custom-scrollbar p-2 border border-[var(--border-color)] rounded-lg bg-[var(--bg-body)]/50">
-                    {orgUnits.map((u) => {
-                        const ids = settings?.transfer_eligible_unit_ids ?? [];
-                        const checked = ids.length === 0 || ids.includes(u.unit_id);
-                        const toggle = () => {
-                            if (!settings) return;
-                            const currentSet = ids.length === 0 ? orgUnits.map(x => x.unit_id) : ids;
-                            const next = checked
-                                ? currentSet.filter(id => id !== u.unit_id)
-                                : [...currentSet, u.unit_id];
-                            setSettings({ ...settings, transfer_eligible_unit_ids: next.length === 0 ? undefined : next });
-                        };
-                        return (
-                            <label key={u.unit_id} className="flex items-center gap-2 cursor-pointer px-3 py-2 rounded-lg border border-[var(--border-color)] hover:bg-[var(--bg-hover)] transition-colors">
-                                <input type="checkbox" checked={checked} onChange={toggle} className="rounded" />
-                                <span className="text-sm font-medium">{u.unit_name}</span>
-                            </label>
-                        );
-                    })}
-                </div>
             </CardContent>
         </Card>
 
@@ -421,6 +396,12 @@ export const SystemSettingsPanel: React.FC<Props> = ({ onSettingsChange }) => {
                                 <input value={settings.n8n_webhook_url} onChange={(e) => setSettings({...settings, n8n_webhook_url: e.target.value})} placeholder="https://your-n8n-instance.com/webhook/..." className="flex-1 bg-[var(--bg-card)] text-[var(--text-main)] p-3 text-sm font-mono focus:outline-none dir-ltr" />
                             </div>
                             <p className="text-xs text-[var(--text-muted)] mt-2 flex items-start gap-1"><Info className="w-3 h-3 mt-0.5 shrink-0" /> {t('webhookHint')}</p>
+                            <div className="pt-2">
+                                <Button onClick={handleTestWebhook} isLoading={isTestingWebhook} variant="secondary" className="w-full">
+                                    {isTestingWebhook ? <RefreshCw className="w-4 h-4 animate-spin ml-2" /> : <Zap className="w-4 h-4 ml-2" />}
+                                    اختبار Webhook
+                                </Button>
+                            </div>
                         </div>
                     </CardContent>
                 </Card>

@@ -46,7 +46,11 @@ USING (VALUES
     ('admin:org-structure', N'الهيكل التنظيمي', N'إدارة الوحدات التنظيمية', N'الهيكل التنظيمي'),
     ('admin:database', N'تحرير قاعدة البيانات', N'الوصول لإدارة الجداول والبيانات', N'قاعدة البيانات'),
     ('admin:settings', N'إعدادات النظام', N'تعديل إعدادات النظام', N'النظام'),
-    ('admin:permissions', N'إدارة الصلاحيات', N'تعيين صلاحيات المستخدمين', N'النظام')
+    ('admin:permissions', N'إدارة الصلاحيات', N'تعيين صلاحيات المستخدمين', N'النظام'),
+    ('manager:home', N'الرئيسية', N'الوصول إلى الصفحة الرئيسية للمدير', N'لوحة المدير'),
+    ('manager:my-requests', N'طلباتي', N'الوصول إلى طلبات المدير الشخصية', N'لوحة المدير'),
+    ('manager:incoming', N'الطلبات الواردة', N'عرض الطلبات الواردة للمدير', N'لوحة المدير'),
+    ('manager:kpis', N'مؤشرات الأداء', N'عرض مؤشرات الأداء للمدير', N'لوحة المدير')
 ) AS src ([permission_key], [label], [description], [group_name])
 ON target.[permission_key] = src.[permission_key]
 WHEN NOT MATCHED THEN

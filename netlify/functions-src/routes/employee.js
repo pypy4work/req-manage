@@ -1,16 +1,61 @@
 const express = require('express');
 const router = express.Router();
-const { query, DIALECT, insertAndGetId, sqlLimit, sqlCoalesce, withTransaction } = require('../db');
+const { query, getDialect, insertAndGetId, withTransaction } = require('../services/db-service');
+
+const parseSettingsJson = (raw) => {
+  if (!raw) return null;
+  if (typeof raw === 'object') return raw;
+  try { return JSON.parse(raw); } catch { return null; }
+};
+
+const getN8nConfig = async () => {
+  const envUrl = process.env.N8N_WEBHOOK_URL || process.env.N8N_WEBHOOK || '';
+  const envMode = process.env.MODE_TYPE || process.env.N8N_MODE || '';
+  try {
+    const rows = await query('SELECT settings_json FROM sca.system_settings WHERE setting_id = 1');
+    const settings = parseSettingsJson(rows?.[0]?.settings_json);
+    return {
+      url: (settings?.n8n_webhook_url || envUrl || '').trim(),
+      mode: settings?.mode_type || envMode
+    };
+  } catch {
+    return { url: envUrl, mode: envMode };
+  }
+};
+
+const sendToN8nWebhook = async (url, payload) => {
+  if (!url) return null;
+  try {
+    const resp = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Source': 'SCA_Request_Management' },
+      body: JSON.stringify(payload)
+    });
+    const text = await resp.text();
+    if (!text) return { success: resp.ok };
+    try { return JSON.parse(text); } catch { return { success: resp.ok, message: text.slice(0, 200) }; }
+  } catch (e) {
+    console.warn('N8N webhook failed', e);
+    return null;
+  }
+};
 
 // GET /api/employee/balances
 router.get('/balances', async (req, res) => {
   try {
-    // Mock balances for now (integrate with your allowance table in prod)
-    res.json([
-      { balance_id: 1, request_type_id: 1, request_name: 'إجازة عارضة', remaining: 7, remaining_days: 7 },
-      { balance_id: 2, request_type_id: 2, request_name: 'إجازة إعتيادية', remaining: 21, remaining_days: 21 },
-      { balance_id: 3, request_type_id: 10, request_name: 'إذن شخصي', remaining: 15, remaining_days: 15 }
-    ]);
+    const userId = Number(req.query.userId || req.query.employeeId || 0);
+    if (!userId) return res.json([]);
+    const rows = await query(
+      `SELECT 
+          b.balance_id, b.user_id, b.request_type_id, b.total_entitlement, b.remaining, b.unit,
+          rt.name AS request_name
+       FROM sca.leave_balances b
+       LEFT JOIN sca.request_types rt ON rt.id = b.request_type_id
+       WHERE b.user_id = @UserId
+       ORDER BY rt.name`,
+      { UserId: userId }
+    );
+    res.json(rows || []);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -18,8 +63,8 @@ router.get('/balances', async (req, res) => {
 router.get('/my-requests/:userId', async (req, res) => {
   try {
     const userId = Number(req.params.userId);
-    const limitPrefix = DIALECT === 'postgres' ? '' : 'TOP 100';
-    const limitSuffix = DIALECT === 'postgres' ? 'LIMIT 100' : '';
+    const limitPrefix = getDialect() === 'postgres' ? '' : 'TOP 100';
+    const limitSuffix = getDialect() === 'postgres' ? 'LIMIT 100' : '';
     
     // Postgres و MSSQL كلاهما يدعم COALESCE
     const sqlText = `
@@ -58,13 +103,29 @@ router.get('/my-requests/:userId', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// GET /api/employee/career-history/:userId
+router.get('/career-history/:userId', async (req, res) => {
+  try {
+    const userId = Number(req.params.userId);
+    const rows = await query(
+      `SELECT history_id, user_id, change_date, reason, prev_job_title, new_job_title,
+              prev_grade_code, new_grade_code, prev_dept, new_dept, changed_by_admin_id
+       FROM sca.career_history
+       WHERE user_id = @UserId
+       ORDER BY change_date ASC`,
+      { UserId: userId }
+    );
+    res.json(rows || []);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // POST /api/employee/submit-request
 router.post('/submit-request', async (req, res) => {
   try {
     const { user_id, employee_name, type_id, duration, start_date, end_date, custom_data } = req.body;
     
     const customDataJson = custom_data ? JSON.stringify(custom_data) : null;
-    const nowFunc = DIALECT === 'postgres' ? 'NOW()' : 'SYSUTCDATETIME()';
+    const nowFunc = getDialect() === 'postgres' ? 'NOW()' : 'SYSUTCDATETIME()';
     
     const sqlText = `INSERT INTO sca.requests (user_id, employee_id, employee_name, type_id, status, start_date, end_date, duration, unit, custom_data, created_at)
       VALUES (@UserId, @UserId, @EmployeeName, @TypeId, @Status, @StartDate, @EndDate, @Duration, @Unit, @CustomData, ${nowFunc})`;
@@ -80,8 +141,41 @@ router.post('/submit-request', async (req, res) => {
       Unit: 'days',
       CustomData: customDataJson
     }, 'request_id');
-    
-    res.json({ request_id: reqId, status: 'PENDING' });
+    let finalStatus = 'PENDING';
+    let rejectionReason = null;
+    let decisionBy = null;
+    let decisionAt = null;
+
+    const { url: n8nUrl, mode } = await getN8nConfig();
+    if (n8nUrl && String(mode).toLowerCase() === 'n8n') {
+      const userRows = await query('SELECT full_name, email, phone_number, job_id, grade_id, org_unit_id FROM sca.users WHERE user_id = @UserId', { UserId: user_id });
+      const userInfo = userRows?.[0] || {};
+      const payload = {
+        meta: { timestamp: new Date().toISOString(), source_system: 'SCA_Request_Management', event_type: 'leave_request' },
+        request: { request_id: reqId, created_at: new Date().toISOString(), type_id: type_id, details: { start_date, end_date, duration }, custom_fields: custom_data || {} },
+        employee: { id: user_id, full_name: userInfo.full_name || employee_name, email: userInfo.email, phone: userInfo.phone_number, org_unit_id: userInfo.org_unit_id }
+      };
+      const n8nResponse = await sendToN8nWebhook(n8nUrl, payload);
+      if (n8nResponse?.auto_approve && n8nResponse?.recommendation === 'APPROVE') {
+        finalStatus = 'APPROVED';
+        decisionBy = 'N8N_Workflow';
+        decisionAt = new Date().toISOString();
+      } else if (n8nResponse?.recommendation === 'REJECT') {
+        finalStatus = 'REJECTED';
+        decisionBy = 'N8N_Workflow';
+        decisionAt = new Date().toISOString();
+        rejectionReason = n8nResponse?.rejection_reason || null;
+      }
+
+      if (finalStatus !== 'PENDING') {
+        await query(
+          `UPDATE sca.requests SET status = @Status, decision_by = @DecisionBy, decision_at = ${nowFunc}, rejection_reason = @Rejection WHERE request_id = @Id`,
+          { Status: finalStatus, DecisionBy: decisionBy, Rejection: rejectionReason, Id: reqId }
+        );
+      }
+    }
+
+    res.json({ request_id: reqId, status: finalStatus, rejection_reason: rejectionReason });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -109,15 +203,15 @@ router.get('/my-transfers/:userId', async (req, res) => {
     if (transfers.length === 0) return res.json([]);
 
     const ids = transfers.map(t => t.transfer_id);
-    const placeholders = DIALECT === 'postgres' 
+    const placeholders = getDialect() === 'postgres' 
       ? ids.map((_, i) => `$${i + 1}`).join(',')
       : ids.join(',');
     
-    const prefsSql = DIALECT === 'postgres'
+    const prefsSql = getDialect() === 'postgres'
       ? `SELECT transfer_id, unit_id, preference_order, reason FROM sca.transfer_preferences WHERE transfer_id = ANY($1::bigint[]) ORDER BY preference_order`
       : `SELECT transfer_id, unit_id, preference_order, reason FROM sca.transfer_preferences WHERE transfer_id IN (${placeholders}) ORDER BY preference_order`;
     
-    const prefsParams = DIALECT === 'postgres' ? { '1': ids } : {};
+    const prefsParams = getDialect() === 'postgres' ? { '1': ids } : {};
     const prefs = await query(prefsSql, prefsParams);
 
     const prefMap = new Map();
@@ -154,8 +248,8 @@ router.post('/transfer-requests', async (req, res) => {
 
     const transferId = await withTransaction(async (tx) => {
       // الحصول على بيانات المستخدم
-      const limitPrefix = DIALECT === 'postgres' ? '' : 'TOP 1';
-      const limitSuffix = DIALECT === 'postgres' ? 'LIMIT 1' : '';
+      const limitPrefix = getDialect() === 'postgres' ? '' : 'TOP 1';
+      const limitSuffix = getDialect() === 'postgres' ? 'LIMIT 1' : '';
       const userRows = await tx.query(
         `SELECT ${limitPrefix} full_name, org_unit_id, job_id, grade_id FROM sca.users WHERE user_id = @UserId ${limitSuffix}`,
         { UserId: userId }
@@ -164,11 +258,11 @@ router.post('/transfer-requests', async (req, res) => {
 
       // إدراج طلب النقل
       const customDynamicJson = JSON.stringify(custom_dynamic_fields || custom_data || {});
-      const nowFunc = DIALECT === 'postgres' ? 'NOW()' : 'GETDATE()';
-      const dateCast = DIALECT === 'postgres' ? 'CURRENT_DATE' : 'CAST(GETDATE() AS DATE)';
-      const willingBool = willing_to_relocate ? (DIALECT === 'postgres' ? true : 1) : (DIALECT === 'postgres' ? false : 0);
+      const nowFunc = getDialect() === 'postgres' ? 'NOW()' : 'GETDATE()';
+      const dateCast = getDialect() === 'postgres' ? 'CURRENT_DATE' : 'CAST(GETDATE() AS DATE)';
+      const willingBool = willing_to_relocate ? (getDialect() === 'postgres' ? true : 1) : (getDialect() === 'postgres' ? false : 0);
 
-      const insertSql = DIALECT === 'postgres'
+      const insertSql = getDialect() === 'postgres'
         ? `INSERT INTO sca.transfer_requests
            (user_id, employee_id, employee_name, template_id, status, current_unit_id, current_job_id, current_grade_id, reason_for_transfer,
             willing_to_relocate, desired_start_date, additional_notes, submission_date, created_at, custom_dynamic_fields)
@@ -199,7 +293,7 @@ router.post('/transfer-requests', async (req, res) => {
         CustomDynamic: customDynamicJson
       });
       
-      const transferId = DIALECT === 'postgres' 
+      const transferId = getDialect() === 'postgres' 
         ? insertResult.rows[0]?.transfer_id
         : insertResult.rows[0]?.transfer_id || insertResult.rows?.[0]?.['SCOPE_IDENTITY()'];
 
@@ -221,7 +315,35 @@ router.post('/transfer-requests', async (req, res) => {
       return transferId;
     });
 
-    res.json({ transfer_id: transferId, status: 'PENDING' });
+    let finalStatus = 'PENDING';
+    let rejectionReason = null;
+    const { url: n8nUrl, mode } = await getN8nConfig();
+    if (n8nUrl && String(mode).toLowerCase() === 'n8n') {
+      const payload = {
+        meta: { timestamp: new Date().toISOString(), source_system: 'SCA_Request_Management', event_type: 'transfer_request' },
+        request: { transfer_id: transferId, template_id, reason_for_transfer, preferred_units, custom_fields: custom_dynamic_fields || custom_data || {} },
+        employee: { id: userId, employee_id: employeeId }
+      };
+      const n8nResponse = await sendToN8nWebhook(n8nUrl, payload);
+      if (n8nResponse?.auto_approve && n8nResponse?.recommendation === 'APPROVE') {
+        finalStatus = 'HR_APPROVED';
+      } else if (n8nResponse?.recommendation === 'REJECT') {
+        finalStatus = 'REJECTED';
+        rejectionReason = n8nResponse?.rejection_reason || null;
+      }
+
+      if (finalStatus !== 'PENDING') {
+        const nowFunc = getDialect() === 'postgres' ? 'NOW()' : 'GETDATE()';
+        await query(
+          `UPDATE sca.transfer_requests
+           SET status = @Status, decision_by = @DecisionBy, decision_at = ${nowFunc}, rejection_reason = @Rejection
+           WHERE transfer_id = @TransferId`,
+          { Status: finalStatus, DecisionBy: 'N8N_Workflow', Rejection: rejectionReason, TransferId: transferId }
+        );
+      }
+    }
+
+    res.json({ transfer_id: transferId, status: finalStatus, rejection_reason: rejectionReason });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -233,7 +355,7 @@ router.put('/transfer-requests/:id', async (req, res) => {
     
     await withTransaction(async (tx) => {
       const customDynamicJson = JSON.stringify(custom_dynamic_fields || custom_data || {});
-      const willingBool = willing_to_relocate ? (DIALECT === 'postgres' ? true : 1) : (DIALECT === 'postgres' ? false : 0);
+      const willingBool = willing_to_relocate ? (getDialect() === 'postgres' ? true : 1) : (getDialect() === 'postgres' ? false : 0);
       
       await tx.query(`
         UPDATE sca.transfer_requests

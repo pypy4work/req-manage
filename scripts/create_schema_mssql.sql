@@ -22,6 +22,62 @@ IF NOT EXISTS (SELECT 1 FROM sys.schemas WHERE name = 'sca')
   EXEC('CREATE SCHEMA sca');
 
 -- =========================
+-- Governance & Audit
+-- =========================
+CREATE TABLE sca.schema_versions (
+  version_id BIGINT IDENTITY(1,1) PRIMARY KEY,
+  version_key NVARCHAR(200) NOT NULL UNIQUE,
+  checksum NVARCHAR(200) NOT NULL,
+  applied_at DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME(),
+  applied_by NVARCHAR(200) NULL,
+  status NVARCHAR(50) NOT NULL DEFAULT 'applied',
+  notes NVARCHAR(MAX) NULL,
+  schema_hash NVARCHAR(200) NULL,
+  execution_ms INT NULL,
+  rollback_at DATETIME2 NULL
+);
+
+CREATE TABLE sca.db_logs (
+  log_id BIGINT IDENTITY(1,1) PRIMARY KEY,
+  occurred_at DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME(),
+  database_type NVARCHAR(50) NOT NULL,
+  operation NVARCHAR(100) NULL,
+  sql_text NVARCHAR(MAX) NULL,
+  params NVARCHAR(MAX) NULL,
+  affected_rows INT NULL,
+  execution_ms INT NULL,
+  user_id NVARCHAR(100) NULL,
+  endpoint NVARCHAR(300) NULL,
+  request_id NVARCHAR(100) NULL,
+  status NVARCHAR(50) NULL,
+  error_message NVARCHAR(MAX) NULL,
+  verification_status NVARCHAR(50) NULL,
+  verification_details NVARCHAR(MAX) NULL,
+  source_service NVARCHAR(100) NULL,
+  is_verification BIT NOT NULL DEFAULT 0,
+  environment NVARCHAR(100) NULL
+);
+
+-- =========================
+-- System Settings & Profile View Config
+-- =========================
+CREATE TABLE sca.system_settings (
+  setting_id INT PRIMARY KEY,
+  settings_json NVARCHAR(MAX) NOT NULL,
+  updated_at DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME()
+);
+
+CREATE TABLE sca.profile_view_config (
+  id NVARCHAR(100) PRIMARY KEY,
+  label_ar NVARCHAR(200) NOT NULL,
+  label_en NVARCHAR(200) NOT NULL,
+  category NVARCHAR(100) NOT NULL,
+  is_visible BIT NOT NULL DEFAULT 1,
+  is_sensitive BIT NOT NULL DEFAULT 0,
+  updated_at DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME()
+);
+
+-- =========================
 -- Reference / HR tables
 -- =========================
 CREATE TABLE sca.job_grades (
@@ -49,6 +105,69 @@ CREATE TABLE sca.org_unit_types (
   type_name_ar NVARCHAR(200) NOT NULL,
   type_name_en NVARCHAR(200) NULL,
   level_order INT NOT NULL
+);
+
+-- =========================
+-- Geography Reference Tables (Egypt)
+-- =========================
+
+CREATE TABLE sca.governorates (
+  governorate_id INT IDENTITY(1,1) PRIMARY KEY,
+  name_ar NVARCHAR(200) NOT NULL,
+  name_en NVARCHAR(200) NULL,
+  code NVARCHAR(50) NULL,
+  geoname_id INT NULL,
+  latitude DECIMAL(9,6) NULL,
+  longitude DECIMAL(9,6) NULL,
+  created_at DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME()
+);
+
+CREATE TABLE sca.centers (
+  center_id INT IDENTITY(1,1) PRIMARY KEY,
+  governorate_id INT NOT NULL REFERENCES sca.governorates(governorate_id),
+  name_ar NVARCHAR(200) NOT NULL,
+  name_en NVARCHAR(200) NULL,
+  geoname_id INT NULL,
+  latitude DECIMAL(9,6) NULL,
+  longitude DECIMAL(9,6) NULL,
+  created_at DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME()
+);
+
+CREATE TABLE sca.cities (
+  city_id INT IDENTITY(1,1) PRIMARY KEY,
+  governorate_id INT NOT NULL REFERENCES sca.governorates(governorate_id),
+  center_id INT NULL REFERENCES sca.centers(center_id),
+  name_ar NVARCHAR(200) NOT NULL,
+  name_en NVARCHAR(200) NULL,
+  geoname_id INT NULL,
+  population INT NULL,
+  latitude DECIMAL(9,6) NULL,
+  longitude DECIMAL(9,6) NULL,
+  created_at DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME()
+);
+
+CREATE TABLE sca.villages (
+  village_id INT IDENTITY(1,1) PRIMARY KEY,
+  center_id INT NULL REFERENCES sca.centers(center_id),
+  name_ar NVARCHAR(200) NOT NULL,
+  name_en NVARCHAR(200) NULL,
+  geoname_id INT NULL,
+  population INT NULL,
+  latitude DECIMAL(9,6) NULL,
+  longitude DECIMAL(9,6) NULL,
+  created_at DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME()
+);
+
+CREATE TABLE sca.neighborhoods (
+  neighborhood_id INT IDENTITY(1,1) PRIMARY KEY,
+  city_id INT NULL REFERENCES sca.cities(city_id),
+  village_id INT NULL REFERENCES sca.villages(village_id),
+  name_ar NVARCHAR(200) NOT NULL,
+  name_en NVARCHAR(200) NULL,
+  geoname_id INT NULL,
+  latitude DECIMAL(9,6) NULL,
+  longitude DECIMAL(9,6) NULL,
+  created_at DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME()
 );
 
 CREATE TABLE sca.organizational_units (
@@ -107,7 +226,10 @@ CREATE TABLE sca.request_types (
   description NVARCHAR(1000) NULL,
   category NVARCHAR(100) NULL,
   unit NVARCHAR(20) NOT NULL DEFAULT 'none',
+  info_bar_content NVARCHAR(MAX) NULL,
   is_system BIT NOT NULL DEFAULT 0,
+  is_transfer_type BIT NOT NULL DEFAULT 0,
+  transfer_config NVARCHAR(MAX) NULL, -- JSON
   fields NVARCHAR(MAX) NULL -- JSON array of FormField objects (frontend-friendly)
 );
 
@@ -144,6 +266,17 @@ CREATE TABLE sca.request_approvals (
   status NVARCHAR(50) NULL,
   comments NVARCHAR(2000) NULL,
   action_date DATETIME2 NULL
+);
+
+CREATE TABLE sca.leave_balances (
+  balance_id INT IDENTITY(1,1) PRIMARY KEY,
+  user_id INT NOT NULL REFERENCES sca.users(user_id),
+  request_type_id INT NOT NULL REFERENCES sca.request_types(id),
+  total_entitlement DECIMAL(18,2) NOT NULL DEFAULT 0,
+  remaining DECIMAL(18,2) NOT NULL DEFAULT 0,
+  unit NVARCHAR(20) NOT NULL DEFAULT 'days',
+  updated_at DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME(),
+  CONSTRAINT UQ_leave_balances UNIQUE (user_id, request_type_id)
 );
 
 -- =========================
@@ -205,7 +338,10 @@ CREATE TABLE sca.transfer_requests (
   status NVARCHAR(50) NOT NULL DEFAULT 'PENDING',
   requested_at DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME(),
   processed_at DATETIME2 NULL,
-  processed_by INT NULL
+  processed_by INT NULL,
+  decision_by NVARCHAR(100) NULL,
+  decision_at DATETIME2 NULL,
+  rejection_reason NVARCHAR(1000) NULL
 );
 
 -- =========================

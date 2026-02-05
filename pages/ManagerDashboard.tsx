@@ -4,15 +4,14 @@ import { LeaveRequest, ManagerStats, User, AttendanceTrend, TimeFilter } from '.
 import { api } from '../services/api';
 import { Card, CardContent, CardHeader, CardTitle, Button, Input } from '../components/ui/UIComponents';
 import { useNotification } from '../components/ui/NotificationSystem';
-import { Check, X, User as UserIcon, Clock, Users, UserCheck, UserMinus, CalendarDays, ArrowRight, BarChart2, Briefcase, Eye, Building, FileText, AlertTriangle, ExternalLink, PenTool, LayoutDashboard, Edit2, Search, Filter, Inbox, ListChecks, PieChart as PieIcon } from 'lucide-react';
+import { Check, X, Clock, Users, UserCheck, UserMinus, CalendarDays, ArrowRight, BarChart2, Briefcase, Eye, Building, FileText, AlertTriangle, ExternalLink, PenTool, Edit2, Search, Filter, Inbox, ListChecks, PieChart as PieIcon } from 'lucide-react';
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer, Legend, AreaChart, Area, CartesianGrid, XAxis, YAxis } from 'recharts';
 import { useLanguage } from '../contexts/LanguageContext';
 import { AttendanceTrendChart } from '../components/analytics/AttendanceTrendChart';
 import { UserProfileModal } from '../components/manager/UserProfileModal';
-import { EmployeeDashboard } from './EmployeeDashboard'; // Reuse for Personal Requests
 
 interface ManagerDashboardProps {
-  view: 'home' | 'approvals' | 'personal';
+  view: 'approvals' | 'kpis';
   user?: User; 
 }
 
@@ -38,52 +37,37 @@ const BentoStatCard = ({ title, value, icon: Icon, color, subValue, subLabel }: 
 );
 
 export const ManagerDashboard: React.FC<ManagerDashboardProps> = ({ view: initialView, user }) => {
-  // Tabs: 'overview', 'approvals', 'personal'
-  const [activeTab, setActiveTab] = useState<'overview' | 'approvals' | 'personal'>('overview');
+  // Tabs: 'kpis', 'approvals'
+  const [activeTab, setActiveTab] = useState<'kpis' | 'approvals'>('kpis');
   
   const [pending, setPending] = useState<LeaveRequest[]>([]);
   const [stats, setStats] = useState<ManagerStats | null>(null);
   const [trendData, setTrendData] = useState<AttendanceTrend[]>([]);
   const [selectedRequest, setSelectedRequest] = useState<LeaveRequest | null>(null);
   const [profileViewUser, setProfileViewUser] = useState<User | null>(null);
-  const [isRootUnit, setIsRootUnit] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
 
   const { t, dir } = useLanguage();
   const { notify } = useNotification();
 
-  // Sync prop view with local view + تحديث المسار (hash) حتى تتزامن القائمة الجانبية
+  // Sync prop view with local view
   useEffect(() => {
       if (initialView === 'approvals') {
           setActiveTab('approvals');
-          if (window.location.hash !== '#/approvals') {
-              window.location.hash = '#/approvals';
-          }
-      } else if (initialView === 'personal') {
-          setActiveTab('personal');
-          if (window.location.hash !== '#/my-requests') {
-              window.location.hash = '#/my-requests';
-          }
-      } else if (initialView === 'home') {
-          // شاشة المدير الرئيسية
-          setActiveTab('overview');
-          if (!window.location.hash || window.location.hash === '#/approvals' || window.location.hash === '#/my-requests') {
-              window.location.hash = '#/';
-          }
+      } else {
+          setActiveTab('kpis');
       }
   }, [initialView]);
 
   useEffect(() => {
     const init = async () => {
         if (user?.user_id) {
-            const [pRequests, mStats, rootCheck] = await Promise.all([
+            const [pRequests, mStats] = await Promise.all([
                 api.manager.getPendingRequests(user.user_id),
-                api.manager.getStats(user),
-                api.manager.isRootUnit(user.user_id)
+                api.manager.getStats(user)
             ]);
             setPending(pRequests);
             setStats(mStats);
-            setIsRootUnit(rootCheck);
             
             // Load Charts
             const tData = await api.manager.getAttendanceTrends('day');
@@ -215,44 +199,13 @@ export const ManagerDashboard: React.FC<ManagerDashboardProps> = ({ view: initia
                     <span className="text-base font-medium">{user?.org_unit_name || 'Unit Manager'}</span>
                 </div>
              </div>
-             
-             {/* Navigation Tabs - مع مزامنة مع المسار حتى تتطابق مع القائمة الجانبية */}
-             <div className="flex bg-[var(--bg-card)] p-1.5 rounded-xl border border-[var(--border-color)] shadow-sm">
-                 <button 
-                    onClick={() => {
-                        setActiveTab('overview');
-                        window.location.hash = '#/';
-                    }}
-                    className={`px-4 py-2 text-sm font-bold rounded-lg transition-all flex items-center gap-2 ${activeTab === 'overview' ? 'bg-[var(--primary)] text-white shadow-md' : 'text-[var(--text-muted)] hover:text-[var(--text-main)] hover:bg-[var(--bg-hover)]'}`}
-                 >
-                     <LayoutDashboard className="w-4 h-4" /> Overview
-                 </button>
-                 <button 
-                    onClick={() => {
-                        setActiveTab('approvals');
-                        window.location.hash = '#/approvals';
-                    }}
-                    className={`px-4 py-2 text-sm font-bold rounded-lg transition-all flex items-center gap-2 ${activeTab === 'approvals' ? 'bg-[var(--primary)] text-white shadow-md' : 'text-[var(--text-muted)] hover:text-[var(--text-main)] hover:bg-[var(--bg-hover)]'}`}
-                 >
-                     <Inbox className="w-4 h-4" /> Approvals
-                     {pending.length > 0 && <span className="bg-red-500 text-white text-[10px] px-1.5 rounded-full">{pending.length}</span>}
-                 </button>
-                 {!isRootUnit && (
-                     <button 
-                        onClick={() => {
-                            setActiveTab('personal');
-                            window.location.hash = '#/my-requests';
-                        }}
-                        className={`px-4 py-2 text-sm font-bold rounded-lg transition-all flex items-center gap-2 ${activeTab === 'personal' ? 'bg-[var(--primary)] text-white shadow-md' : 'text-[var(--text-muted)] hover:text-[var(--text-main)] hover:bg-[var(--bg-hover)]'}`}
-                     >
-                         <UserIcon className="w-4 h-4" /> My Requests
-                     </button>
-                 )}
+             <div className="flex items-center gap-2 text-xs font-bold text-[var(--text-muted)] bg-[var(--bg-card)] px-3 py-2 rounded-lg border border-[var(--border-color)]">
+                {activeTab === 'approvals' ? t('incomingRequests') : t('performanceIndicators')}
              </div>
         </div>
         
-        {/* 2. OVERVIEW TAB */}
-        {activeTab === 'overview' && (
+        {/* 2. KPI TAB */}
+        {activeTab === 'kpis' && (
             <div className="space-y-6 animate-in slide-in-from-bottom-2 duration-500">
                 {/* KPI Grid */}
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5">
@@ -360,12 +313,6 @@ export const ManagerDashboard: React.FC<ManagerDashboardProps> = ({ view: initia
             </div>
         )}
 
-        {/* 4. PERSONAL TAB (My Requests) */}
-        {activeTab === 'personal' && !isRootUnit && (
-            <div className="animate-in slide-in-from-right-2 duration-500">
-                <EmployeeDashboard user={user} view="requests" />
-            </div>
-        )}
     </div>
   );
 };

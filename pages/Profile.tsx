@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect } from 'react';
-import { User, SystemSettings, Address, Role } from '../types';
+import { User, SystemSettings, Address, Role, CareerHistory } from '../types';
 import { api } from '../services/api';
 import { Card, CardContent, Button, Input } from '../components/ui/UIComponents';
 import { Camera, Lock, Mail, Phone, MapPin, Calendar, CreditCard, Building, ShieldCheck, CheckCircle2, User as UserIcon, Edit2, Smartphone, Info, AlertTriangle, ShieldAlert, ScanFace, Check, Briefcase, Award, Users } from 'lucide-react';
@@ -14,12 +14,47 @@ const formatAddress = (addr?: Address | string | null): string => {
     .filter(Boolean).join('، ') || '';
 };
 
+const buildUnitHistory = (history: CareerHistory[], user: User) => {
+  const sorted = [...history].sort((a, b) => {
+    const da = new Date(a.change_date).getTime();
+    const db = new Date(b.change_date).getTime();
+    return da - db;
+  });
+
+  const items: { unit: string; date?: string; reason?: string }[] = [];
+
+  if (sorted.length > 0) {
+    const first = sorted[0];
+    if (first.prev_dept) {
+      items.push({ unit: first.prev_dept, date: user.join_date || first.change_date, reason: first.reason });
+    }
+    sorted.forEach(h => {
+      if (h.new_dept) items.push({ unit: h.new_dept, date: h.change_date, reason: h.reason });
+    });
+  } else if (user.org_unit_name) {
+    items.push({ unit: user.org_unit_name, date: user.join_date });
+  }
+
+  if (user.org_unit_name && !items.some(i => i.unit === user.org_unit_name)) {
+    items.push({ unit: user.org_unit_name, date: user.join_date });
+  }
+
+  const seen = new Set<string>();
+  return items.filter(i => {
+    const key = `${i.unit}|${i.date || ''}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+};
+
 export const Profile: React.FC<{ user: User; settings?: SystemSettings | null }> = ({ user, settings }) => {
   const [photo, setPhoto] = useState(user.picture_url || "https://picsum.photos/200");
   const [isUploading, setIsUploading] = useState(false);
   const [gradeName, setGradeName] = useState<string>('');
   const [employmentTypeName, setEmploymentTypeName] = useState<string>('');
   const [managerName, setManagerName] = useState<string>('');
+  const [careerHistory, setCareerHistory] = useState<CareerHistory[]>([]);
   const { t } = useLanguage();
   const { notify } = useNotification();
 
@@ -41,6 +76,20 @@ export const Profile: React.FC<{ user: User; settings?: SystemSettings | null }>
     };
     loadLookups();
   }, [user.grade_id, user.type_id, user.manager_id]);
+
+  useEffect(() => {
+    let active = true;
+    const loadHistory = async () => {
+      try {
+        const rows = await api.employee.getCareerHistory(user.user_id);
+        if (active) setCareerHistory(rows || []);
+      } catch {
+        if (active) setCareerHistory([]);
+      }
+    };
+    loadHistory();
+    return () => { active = false; };
+  }, [user.user_id]);
 
   // Unified Security State
   const [editMode, setEditMode] = useState<string | null>(null);
@@ -158,6 +207,8 @@ export const Profile: React.FC<{ user: User; settings?: SystemSettings | null }>
       }
   };
 
+  const unitHistory = buildUnitHistory(careerHistory, user);
+
   return (
     <div className="max-w-4xl mx-auto space-y-8 pb-4 animate-in fade-in duration-500">
       
@@ -236,6 +287,27 @@ export const Profile: React.FC<{ user: User; settings?: SystemSettings | null }>
                            <InfoItem label="الراتب الأساسي" value={`${user.salary.toLocaleString('ar-EG')} ج.م`} icon={<CreditCard className="w-4 h-4" />} />
                          )}
                     </div>
+                    {unitHistory.length > 0 && (
+                      <div className="mt-6 p-4 rounded-xl border border-[var(--border-color)] bg-[var(--bg-body)]/60">
+                        <h4 className="font-bold text-sm mb-3 text-[var(--text-main)] flex items-center gap-2">
+                          <Building className="w-4 h-4 text-[var(--primary)]" />
+                          الوحدات التي عمل بها (مرتبة حسب تاريخ الإلتحاق)
+                        </h4>
+                        <ol className="list-decimal list-inside space-y-2 text-sm text-[var(--text-secondary)]">
+                          {unitHistory.map((entry, idx) => (
+                            <li key={`${entry.unit}-${idx}`} className="flex flex-col gap-1">
+                              <span className="font-medium text-[var(--text-main)]">{entry.unit}</span>
+                              <span className="text-[11px] text-[var(--text-muted)]">
+                                تاريخ الإلتحاق: {entry.date ? new Date(entry.date).toLocaleDateString('ar-EG') : '—'}
+                              </span>
+                              {entry.reason && (
+                                <span className="text-[11px] text-[var(--text-muted)]">سبب التغيير: {entry.reason}</span>
+                              )}
+                            </li>
+                          ))}
+                        </ol>
+                      </div>
+                    )}
                  </CardContent>
              </Card>
 
@@ -334,12 +406,12 @@ export const Profile: React.FC<{ user: User; settings?: SystemSettings | null }>
                                         type={editMode === 'password' ? 'password' : 'text'} 
                                         value={inputValue} 
                                         onChange={e => setInputValue(e.target.value)} 
-                                        className="bg-white"
+                                        className="bg-[var(--bg-card)]"
                                      />
                                      {editMode === 'password' && (
                                          <div className="mt-2">
                                           <label className="text-xs font-bold mb-1 block">{t('confirmPassword')}</label>
-                                          <Input type="password" value={confirmValue} onChange={e => setConfirmValue(e.target.value)} className="bg-white"/>
+                                          <Input type="password" value={confirmValue} onChange={e => setConfirmValue(e.target.value)} className="bg-[var(--bg-card)]"/>
                                          </div>
                                      )}
                                    </div>
@@ -355,7 +427,7 @@ export const Profile: React.FC<{ user: User; settings?: SystemSettings | null }>
                                         value={otpInput} 
                                         onChange={e => setOtpInput(e.target.value)} 
                                         placeholder="XXXX"
-                                        className="text-center tracking-widest text-lg font-mono bg-white"
+                                        className="text-center tracking-widest text-lg font-mono bg-[var(--bg-card)]"
                                      />
                                    </div>
                                 )}
@@ -398,7 +470,7 @@ const InfoItem = ({ label, value, icon, fullWidth }: { label: string, value?: st
             {icon} {label}
         </span>
         <div className="text-[var(--text-main)] font-medium text-lg border-b border-[var(--border-color)] pb-1 group-hover:border-[var(--primary)] transition-colors">
-            {value || <span className="text-slate-300 italic">--</span>}
+            {value || <span className="text-[var(--text-muted)] italic">--</span>}
         </div>
     </div>
 );

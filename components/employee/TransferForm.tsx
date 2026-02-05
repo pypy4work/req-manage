@@ -3,7 +3,7 @@ import { TransferRequest, TransferPreference, RequestDefinition, FormField } fro
 import { Card, CardContent, CardHeader, CardTitle, Button, Input } from '../ui/UIComponents';
 import { useNotification } from '../ui/NotificationSystem';
 import { api } from '../../services/api';
-import { Plus, Trash2, GripVertical, MapPin, CheckCircle, AlertCircle } from 'lucide-react';
+import { Plus, Trash2, GripVertical, AlertCircle } from 'lucide-react';
 import {
   DndContext,
   closestCenter,
@@ -75,7 +75,7 @@ const SortablePreferenceItem: React.FC<{
       <select
         value={preference.unit_id}
         onChange={(e) => onUpdate(index, 'unit_id', parseInt(e.target.value))}
-        className="flex-1 p-2 border rounded-md bg-white dark:bg-slate-700"
+        className="flex-1 p-2 border rounded-md bg-white dark:bg-slate-700 text-[var(--text-main)]"
         required
       >
         <option value={0}>-- اختر وحدة --</option>
@@ -149,6 +149,10 @@ export const TransferForm: React.FC<TransferFormProps> = ({
     'اختر الوحدات الإدارية المفضلة بترتيب الأولوية';
   const transferFields = (requestDefinition?.fields?.length ? requestDefinition.fields : DEFAULT_TRANSFER_FIELDS)
     .filter(field => field.isVisible !== false);
+  const infoBarItems = (requestDefinition?.info_bar_content || '')
+    .split('\n')
+    .map(line => line.trim())
+    .filter(Boolean);
 
   useEffect(() => {
     const base: Record<string, any> = {};
@@ -274,10 +278,10 @@ export const TransferForm: React.FC<TransferFormProps> = ({
     const value = formData[field.id] ?? (field.type === 'boolean' ? false : '');
 
     let inputEl: React.ReactNode;
-    if (field.type === 'boolean') {
+      if (field.type === 'boolean') {
       inputEl = (
         <select
-          className="w-full rounded-md border border-gray-300 bg-white p-2"
+          className="w-full rounded-md border border-[var(--border-color)] bg-[var(--bg-card)] p-2 text-[var(--text-main)]"
           value={value === true ? 'true' : value === false ? 'false' : ''}
           onChange={(e) => setFormData({ ...formData, [field.id]: e.target.value === '' ? undefined : e.target.value === 'true' })}
           disabled={field.isReadOnly}
@@ -409,7 +413,7 @@ export const TransferForm: React.FC<TransferFormProps> = ({
                       <select
                         value={pref.unit_id}
                         onChange={(e) => handleUpdatePreference(index, 'unit_id', parseInt(e.target.value))}
-                        className="flex-1 p-2 border rounded-md bg-white dark:bg-slate-700"
+                        className="flex-1 p-2 border rounded-md bg-white dark:bg-slate-700 text-[var(--text-main)]"
                         required
                       >
                         <option value={0}>-- اختر وحدة --</option>
@@ -460,23 +464,23 @@ export const TransferForm: React.FC<TransferFormProps> = ({
         </CardContent>
       </Card>
 
-      {/* Info Card */}
-      <Card className="bg-blue-50 border-blue-200">
-        <CardContent className="pt-4">
-          <div className="flex items-start gap-3">
-            <AlertCircle className="w-5 h-5 text-blue-600 flex-shrink-0 mt-0.5" />
-            <div className="text-sm text-blue-900">
-              <p className="font-medium mb-2">معلومات مهمة:</p>
-              <ul className="list-disc list-inside space-y-1">
-                <li>ترتب الوحدات حسب أولويتك (الأولى = التفضيل الأول)</li>
-                <li>سيتم مراجعة طلبك من قبل مديرك والموارد البشرية</li>
-                <li>سيتم المطابقة العادلة بناءً على احتياجات الوحدات والأداء</li>
-                <li>ستتلقى إشعاراً بقرار التوزيع</li>
-              </ul>
+      {infoBarItems.length > 0 && (
+        <Card className="bg-blue-50 border-blue-200">
+          <CardContent className="pt-4">
+            <div className="flex items-start gap-3">
+              <AlertCircle className="w-5 h-5 text-blue-600 flex-shrink-0 mt-0.5" />
+              <div className="text-sm text-blue-900">
+                <p className="font-medium mb-2">معلومات مهمة:</p>
+                <ul className="list-disc list-inside space-y-1">
+                  {infoBarItems.map((item, idx) => (
+                    <li key={`${idx}-${item.slice(0, 20)}`}>{item}</li>
+                  ))}
+                </ul>
+              </div>
             </div>
-          </div>
-        </CardContent>
-      </Card>
+          </CardContent>
+        </Card>
+      )}
     </div>
   );
 };

@@ -3,7 +3,7 @@ import React, { useState, useEffect } from 'react';
 import { RequestDefinition, FormField, ValidationRule, FieldType, DocumentRequirement, UnitType, RuleOperand, DataSource, DataTransformation, ComputationOp, ComputedOperandDef } from '../../types';
 import { api } from '../../services/api';
 import { Card, CardContent, CardHeader, CardTitle, Button, Input } from '../../components/ui/UIComponents';
-import { Trash2, Plus, Edit2, ArrowRight, Eye, EyeOff, Lock, Unlock, Activity, Save, X, Settings2, Link, Calculator, List, FunctionSquare, ChevronUp, ChevronDown } from 'lucide-react';
+import { Trash2, Plus, Edit2, ArrowRight, Eye, EyeOff, Lock, Unlock, Activity, Save, X, Settings2, Link, Calculator, List, FunctionSquare, ChevronUp, ChevronDown, Info } from 'lucide-react';
 import { useLanguage } from '../../contexts/LanguageContext';
 
 const SYSTEM_TEMPLATES: Record<UnitType, FormField[]> = {
@@ -247,7 +247,7 @@ export const RequestTypesManagement: React.FC = () => {
   };
   
   const handleCreate = () => { 
-      const base: RequestDefinition = { id: 0, name: '', unit: 'days', fields: [], linked_rules: [], linked_documents: [], rules: [], documents: [] };
+      const base: RequestDefinition = { id: 0, name: '', unit: 'days', fields: [], linked_rules: [], linked_documents: [], rules: [], documents: [], info_bar_content: '' };
       base.fields = ensureSystemFields(base, 'days');
       setEditingType(base); 
   };
@@ -582,6 +582,30 @@ export const RequestTypesManagement: React.FC = () => {
                             </div>
                         </div>
                     )}
+                </CardContent>
+            </Card>
+
+            {/* Info Bar Content Card */}
+            <Card className="border-l-4 border-l-cyan-500 shadow-sm">
+                <CardHeader className="pb-2">
+                    <CardTitle className="text-base md:text-lg flex items-center gap-2">
+                        <Info className="w-4 h-4 text-cyan-600" />
+                        شريط المعلومات أسفل النموذج
+                    </CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                    <label className="text-xs font-bold text-[var(--text-secondary)] mb-1.5 block uppercase tracking-wide">
+                        محتوى شريط المعلومات (سطر لكل نقطة)
+                    </label>
+                    <textarea
+                        className="w-full min-h-[120px] rounded-lg border border-[var(--border-color)] bg-[var(--bg-card)] p-3 text-sm focus:outline-none focus:ring-2 focus:ring-[var(--primary)]"
+                        value={editingType.info_bar_content || ''}
+                        onChange={(e) => setEditingType({ ...editingType, info_bar_content: e.target.value })}
+                        placeholder="مثال:\nترتب الوحدات حسب أولويتك (الأولى = التفضيل الأول)\nسيتم مراجعة طلبك من قبل مديرك والموارد البشرية"
+                    />
+                    <p className="text-xs text-[var(--text-muted)]">
+                        يظهر هذا الشريط في نافذة تقديم طلب جديد حسب نوع الطلب المختار.
+                    </p>
                 </CardContent>
             </Card>
 

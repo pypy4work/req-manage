@@ -12,6 +12,64 @@
 CREATE SCHEMA IF NOT EXISTS sca;
 
 -- =========================
+-- Governance & Audit
+-- =========================
+
+CREATE TABLE IF NOT EXISTS sca.schema_versions (
+  version_id BIGSERIAL PRIMARY KEY,
+  version_key TEXT NOT NULL UNIQUE,
+  checksum TEXT NOT NULL,
+  applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  applied_by TEXT,
+  status TEXT NOT NULL DEFAULT 'applied',
+  notes TEXT,
+  schema_hash TEXT,
+  execution_ms INT,
+  rollback_at TIMESTAMPTZ
+);
+
+CREATE TABLE IF NOT EXISTS sca.db_logs (
+  log_id BIGSERIAL PRIMARY KEY,
+  occurred_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  database_type TEXT NOT NULL,
+  operation TEXT,
+  sql_text TEXT,
+  params JSONB,
+  affected_rows INT,
+  execution_ms INT,
+  user_id TEXT,
+  endpoint TEXT,
+  request_id TEXT,
+  status TEXT,
+  error_message TEXT,
+  verification_status TEXT,
+  verification_details JSONB,
+  source_service TEXT,
+  is_verification BOOLEAN NOT NULL DEFAULT FALSE,
+  environment TEXT
+);
+
+-- =========================
+-- System Settings & Profile View Config
+-- =========================
+
+CREATE TABLE IF NOT EXISTS sca.system_settings (
+  setting_id INT PRIMARY KEY,
+  settings_json JSONB NOT NULL,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS sca.profile_view_config (
+  id TEXT PRIMARY KEY,
+  label_ar TEXT NOT NULL,
+  label_en TEXT NOT NULL,
+  category TEXT NOT NULL,
+  is_visible BOOLEAN NOT NULL DEFAULT TRUE,
+  is_sensitive BOOLEAN NOT NULL DEFAULT FALSE,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- =========================
 -- Reference / HR tables
 -- =========================
 
@@ -40,6 +98,69 @@ CREATE TABLE IF NOT EXISTS sca.org_unit_types (
   type_name_ar TEXT NOT NULL,
   type_name_en TEXT,
   level_order INT NOT NULL
+);
+
+-- =========================
+-- Geography Reference Tables (Egypt)
+-- =========================
+
+CREATE TABLE IF NOT EXISTS sca.governorates (
+  governorate_id SERIAL PRIMARY KEY,
+  name_ar TEXT NOT NULL,
+  name_en TEXT,
+  code TEXT,
+  geoname_id INT,
+  latitude NUMERIC(9,6),
+  longitude NUMERIC(9,6),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS sca.centers (
+  center_id SERIAL PRIMARY KEY,
+  governorate_id INT NOT NULL REFERENCES sca.governorates(governorate_id) ON DELETE CASCADE,
+  name_ar TEXT NOT NULL,
+  name_en TEXT,
+  geoname_id INT,
+  latitude NUMERIC(9,6),
+  longitude NUMERIC(9,6),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS sca.cities (
+  city_id SERIAL PRIMARY KEY,
+  governorate_id INT NOT NULL REFERENCES sca.governorates(governorate_id) ON DELETE CASCADE,
+  center_id INT REFERENCES sca.centers(center_id),
+  name_ar TEXT NOT NULL,
+  name_en TEXT,
+  geoname_id INT,
+  population INT,
+  latitude NUMERIC(9,6),
+  longitude NUMERIC(9,6),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS sca.villages (
+  village_id SERIAL PRIMARY KEY,
+  center_id INT REFERENCES sca.centers(center_id) ON DELETE CASCADE,
+  name_ar TEXT NOT NULL,
+  name_en TEXT,
+  geoname_id INT,
+  population INT,
+  latitude NUMERIC(9,6),
+  longitude NUMERIC(9,6),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS sca.neighborhoods (
+  neighborhood_id SERIAL PRIMARY KEY,
+  city_id INT REFERENCES sca.cities(city_id) ON DELETE CASCADE,
+  village_id INT REFERENCES sca.villages(village_id) ON DELETE CASCADE,
+  name_ar TEXT NOT NULL,
+  name_en TEXT,
+  geoname_id INT,
+  latitude NUMERIC(9,6),
+  longitude NUMERIC(9,6),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 CREATE TABLE IF NOT EXISTS sca.organizational_units (
@@ -97,6 +218,7 @@ CREATE TABLE IF NOT EXISTS sca.request_types (
   description TEXT,
   category TEXT,
   unit TEXT NOT NULL DEFAULT 'none',
+  info_bar_content TEXT,
   is_system BOOLEAN NOT NULL DEFAULT FALSE,
   is_transfer_type BOOLEAN NOT NULL DEFAULT FALSE,
   transfer_config JSONB,
@@ -136,6 +258,17 @@ CREATE TABLE IF NOT EXISTS sca.request_approvals (
   status TEXT,
   comments TEXT,
   action_date TIMESTAMPTZ
+);
+
+CREATE TABLE IF NOT EXISTS sca.leave_balances (
+  balance_id SERIAL PRIMARY KEY,
+  user_id INT NOT NULL REFERENCES sca.users(user_id),
+  request_type_id INT NOT NULL REFERENCES sca.request_types(id),
+  total_entitlement NUMERIC(18,2) NOT NULL DEFAULT 0,
+  remaining NUMERIC(18,2) NOT NULL DEFAULT 0,
+  unit TEXT NOT NULL DEFAULT 'days',
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (user_id, request_type_id)
 );
 
 -- =========================
@@ -213,6 +346,8 @@ CREATE TABLE IF NOT EXISTS sca.transfer_requests (
   approved_by INT,
   approval_date DATE,
   rejection_reason TEXT,
+  decision_by TEXT,
+  decision_at TIMESTAMPTZ,
   custom_dynamic_fields JSONB,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   assignee_id INT
@@ -319,7 +454,40 @@ INSERT INTO sca.users (employee_number, full_employee_number, full_name, usernam
 VALUES ('10001','ADM-10001', 'مسؤول النظام الرئيسي', 'admin', 'admin@sca.gov.eg', 'Admin', 1, 3, 2, 16000)
 ON CONFLICT (username) DO NOTHING;
 
+-- Seed default leave balances (can be adjusted later)
+INSERT INTO sca.leave_balances (user_id, request_type_id, total_entitlement, remaining, unit)
+SELECT
+  u.user_id,
+  rt.id,
+  CASE WHEN rt.unit = 'hours' THEN 16 WHEN rt.unit = 'days' THEN 30 ELSE 0 END AS total_entitlement,
+  CASE WHEN rt.unit = 'hours' THEN 16 WHEN rt.unit = 'days' THEN 30 ELSE 0 END AS remaining,
+  rt.unit
+FROM sca.users u
+JOIN sca.request_types rt ON rt.unit IN ('hours','days')
+ON CONFLICT (user_id, request_type_id) DO NOTHING;
+
+-- Seed default profile view config
+INSERT INTO sca.profile_view_config (id, label_ar, label_en, category, is_visible, is_sensitive)
+VALUES
+  ('picture_url', 'الصورة الشخصية', 'Profile Picture', 'personal', TRUE, FALSE),
+  ('full_name', 'الاسم بالكامل', 'Full Name', 'personal', TRUE, FALSE),
+  ('full_employee_number', 'كود الموظف', 'Employee Code', 'professional', TRUE, FALSE),
+  ('national_id', 'الرقم القومي', 'National ID', 'personal', FALSE, TRUE),
+  ('job_title', 'المسمى الوظيفي', 'Job Title', 'professional', TRUE, FALSE),
+  ('org_unit_name', 'الجهة الإدارية', 'Department', 'professional', TRUE, FALSE),
+  ('org_units_history', 'الوحدات التي عمل بها', 'Units History', 'professional', TRUE, FALSE),
+  ('salary', 'الراتب الأساسي', 'Salary', 'financial', FALSE, TRUE),
+  ('join_date', 'تاريخ التعيين', 'Join Date', 'professional', TRUE, FALSE),
+  ('phone_number', 'رقم الهاتف', 'Phone', 'contact', TRUE, FALSE),
+  ('email', 'البريد الإلكتروني', 'Email', 'contact', TRUE, FALSE),
+  ('address', 'العنوان', 'Address', 'contact', FALSE, TRUE),
+  ('birth_date', 'تاريخ الميلاد', 'Date of Birth', 'personal', FALSE, TRUE)
+ON CONFLICT (id) DO NOTHING;
+
 -- Indexes
+ALTER TABLE sca.request_types ADD COLUMN IF NOT EXISTS info_bar_content TEXT;
+ALTER TABLE sca.transfer_requests ADD COLUMN IF NOT EXISTS decision_by TEXT;
+ALTER TABLE sca.transfer_requests ADD COLUMN IF NOT EXISTS decision_at TIMESTAMPTZ;
 CREATE INDEX IF NOT EXISTS IX_requests_user ON sca.requests(user_id);
 CREATE INDEX IF NOT EXISTS IX_requests_type ON sca.requests(type_id);
 
@@ -335,5 +503,9 @@ VALUES
   ('admin:org-structure', 'الهيكل التنظيمي', 'إدارة الوحدات التنظيمية', 'الهيكل التنظيمي'),
   ('admin:database', 'تحرير قاعدة البيانات', 'الوصول لإدارة الجداول والبيانات', 'قاعدة البيانات'),
   ('admin:settings', 'إعدادات النظام', 'تعديل إعدادات النظام', 'النظام'),
-  ('admin:permissions', 'إدارة الصلاحيات', 'تعيين صلاحيات المستخدمين', 'النظام')
+  ('admin:permissions', 'إدارة الصلاحيات', 'تعيين صلاحيات المستخدمين', 'النظام'),
+  ('manager:home', 'الرئيسية', 'الوصول إلى الصفحة الرئيسية للمدير', 'لوحة المدير'),
+  ('manager:my-requests', 'طلباتي', 'الوصول إلى طلبات المدير الشخصية', 'لوحة المدير'),
+  ('manager:incoming', 'الطلبات الواردة', 'عرض الطلبات الواردة للمدير', 'لوحة المدير'),
+  ('manager:kpis', 'مؤشرات الأداء', 'عرض مؤشرات الأداء للمدير', 'لوحة المدير')
 ON CONFLICT (permission_key) DO NOTHING;

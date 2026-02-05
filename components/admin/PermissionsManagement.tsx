@@ -25,8 +25,13 @@ export const PermissionsManagement: React.FC = () => {
   const protectedRoutes = [
     { id: 'settings', label: 'إعدادات النظام', hash: '#/settings' },
     { id: 'database', label: 'إدارة قاعدة البيانات', hash: '#/database' },
-    { id: 'requests', label: 'إدارة الطلبات', hash: '#/requests' },
-    { id: 'transfers', label: 'إدارة التنقلات', hash: '#/transfers' }
+    { id: 'users', label: 'إدارة المستخدمين', hash: '#/users' },
+    { id: 'request-types', label: 'إدارة أنواع الطلبات', hash: '#/request-types' },
+    { id: 'org-structure', label: 'الهيكل التنظيمي', hash: '#/org-structure' },
+    { id: 'allocation-criteria', label: 'معايير التوزيع', hash: '#/allocation-criteria' },
+    { id: 'transfers', label: 'إدارة التنقلات', hash: '#/transfers' },
+    { id: 'stats', label: 'الإحصائيات', hash: '#/stats' },
+    { id: 'permissions', label: 'إدارة الصلاحيات', hash: '#/permissions' }
   ];
 
   useEffect(() => {

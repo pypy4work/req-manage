@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const { query, DIALECT } = require('../db');
+const { query, getDialect } = require('../services/db-service');
 
 // أداة مساعدة لحساب المسافة بين إحداثيين (Haversine) بالكيلومتر
 function haversineDistance(lat1, lon1, lat2, lon2) {
@@ -87,8 +87,8 @@ router.get('/travel-time', async (req, res) => {
 router.get('/pending-requests/:managerId', async (req, res) => {
   try {
     const managerId = Number(req.params.managerId);
-    const limitPrefix = DIALECT === 'postgres' ? '' : 'TOP 100';
-    const limitSuffix = DIALECT === 'postgres' ? 'LIMIT 100' : '';
+    const limitPrefix = getDialect() === 'postgres' ? '' : 'TOP 100';
+    const limitSuffix = getDialect() === 'postgres' ? 'LIMIT 100' : '';
     const rows = await query(
       `SELECT ${limitPrefix} r.request_id, r.user_id, r.employee_name, r.type_id, rt.name AS leave_name, r.status, r.start_date, r.end_date, r.duration, r.unit, r.created_at
        FROM sca.requests r 
@@ -105,7 +105,7 @@ router.post('/action-request/:requestId', async (req, res) => {
     const requestId = Number(req.params.requestId);
     const { action, reason } = req.body;
     const newStatus = action === 'Approve' ? 'APPROVED' : 'REJECTED';
-    const nowFunc = DIALECT === 'postgres' ? 'NOW()' : 'SYSUTCDATETIME()';
+    const nowFunc = getDialect() === 'postgres' ? 'NOW()' : 'SYSUTCDATETIME()';
     
     await query(
       `UPDATE sca.requests SET status = @Status, decision_at = ${nowFunc}, rejection_reason = @Reason WHERE request_id = @Id`,
@@ -165,7 +165,7 @@ router.get('/transfer-requests/:managerId', async (req, res) => {
 router.post('/transfer-assessments', async (req, res) => {
   try {
     const { transfer_id, manager_id, performance_rating, readiness_for_transfer, recommendation } = req.body;
-    const nowFunc = DIALECT === 'postgres' ? 'NOW()' : 'GETDATE()';
+    const nowFunc = getDialect() === 'postgres' ? 'NOW()' : 'GETDATE()';
     
     await query(
       `INSERT INTO sca.transfer_manager_assessments

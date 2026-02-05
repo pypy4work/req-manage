@@ -116,7 +116,7 @@ export const AddressForm: React.FC<AddressFormProps> = ({
               });
             }}
             required={required}
-            className="w-full border rounded-md px-3 py-2 bg-white dark:bg-slate-900 text-sm"
+            className="w-full border border-[var(--border-color)] rounded-md px-3 py-2 bg-[var(--bg-card)] text-[var(--text-main)] text-sm focus:outline-none focus:ring-2 focus:ring-[var(--primary)]/30"
           >
             <option value="">اختر المحافظة</option>
             {GOVERNORATES.map(g => (
@@ -143,7 +143,7 @@ export const AddressForm: React.FC<AddressFormProps> = ({
               });
             }}
             required={required}
-            className="w-full border rounded-md px-3 py-2 bg-white dark:bg-slate-900 text-sm"
+            className="w-full border border-[var(--border-color)] rounded-md px-3 py-2 bg-[var(--bg-card)] text-[var(--text-main)] text-sm focus:outline-none focus:ring-2 focus:ring-[var(--primary)]/30"
             disabled={!formData.governorate}
           >
             <option value="">{formData.governorate ? 'اختر المدينة/المركز' : 'اختر المحافظة أولاً'}</option>
@@ -163,7 +163,7 @@ export const AddressForm: React.FC<AddressFormProps> = ({
           value={formData.district}
           onChange={(e) => handleChange('district', e.target.value)}
           required={required}
-          className="w-full border rounded-md px-3 py-2 bg-white dark:bg-slate-900 text-sm"
+          className="w-full border border-[var(--border-color)] rounded-md px-3 py-2 bg-[var(--bg-card)] text-[var(--text-main)] text-sm focus:outline-none focus:ring-2 focus:ring-[var(--primary)]/30"
           disabled={!formData.city}
         >
           <option value="">{formData.city ? 'اختر الحي/القرية' : 'اختر المدينة أولاً'}</option>
@@ -223,7 +223,7 @@ export const AddressForm: React.FC<AddressFormProps> = ({
           </div>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div>
-              <label className="block text-xs text-gray-500 mb-1">خط العرض (Latitude)</label>
+              <label className="block text-xs text-[var(--text-muted)] mb-1">خط العرض (Latitude)</label>
               <Input
                 type="number"
                 step="any"
@@ -234,7 +234,7 @@ export const AddressForm: React.FC<AddressFormProps> = ({
               />
             </div>
             <div>
-              <label className="block text-xs text-gray-500 mb-1">خط الطول (Longitude)</label>
+              <label className="block text-xs text-[var(--text-muted)] mb-1">خط الطول (Longitude)</label>
               <Input
                 type="number"
                 step="any"
@@ -257,7 +257,7 @@ export const AddressForm: React.FC<AddressFormProps> = ({
               </Button>
             </div>
           </div>
-          <p className="text-xs text-gray-500 mt-2">
+          <p className="text-xs text-[var(--text-muted)] mt-2">
             💡 الإحداثيات تستخدم لحساب المسافة بين موقع العمل ومحل الإقامة
           </p>
         </div>

@@ -110,12 +110,13 @@ interface ThemeSettingsPanelProps {
 
 export const ThemeSettingsPanel: React.FC<ThemeSettingsPanelProps> = ({ currentTheme, onUpdate, isOpen, onClose }) => {
   const { language, setLanguage, t, dir } = useLanguage();
+  const surface = currentTheme.surface || 'glass';
   
   if (!isOpen) return null;
 
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in duration-300" dir={dir}>
-      <div className="bg-[var(--bg-card)] w-full max-w-md rounded-3xl shadow-2xl border border-[var(--glass-border)] overflow-hidden animate-in zoom-in-95 duration-300">
+      <div className="bg-[var(--bg-card)] w-full max-w-md rounded-3xl shadow-2xl border border-[var(--glass-border)] overflow-hidden animate-in zoom-in-95 duration-300 flex flex-col max-h-[90vh]">
         <div className="p-5 border-b border-[var(--border-color)] flex justify-between items-center bg-[var(--primary)]/5">
           <h3 className="font-bold flex items-center gap-2 text-[length:var(--font-size-lg)] text-[var(--primary)]">
             <Palette className="w-6 h-6" />
@@ -126,7 +127,7 @@ export const ThemeSettingsPanel: React.FC<ThemeSettingsPanelProps> = ({ currentT
           </button>
         </div>
         
-        <div className="p-6 space-y-8">
+        <div className="p-6 space-y-8 overflow-y-auto flex-1 min-h-0">
           
           {/* Language Selector */}
           <div>
@@ -169,27 +170,66 @@ export const ThemeSettingsPanel: React.FC<ThemeSettingsPanelProps> = ({ currentT
             </div>
           </div>
 
+          {/* Color Panel */}
+          <div>
+            <label className="block text-sm font-bold mb-3 text-[var(--text-main)]">{t('colorPanel')}</label>
+            <div className="grid grid-cols-3 gap-3">
+              {[
+                { id: 'glass', label: t('surfaceGlass') },
+                { id: 'solid', label: t('surfaceSolid') },
+                { id: 'paper', label: t('surfacePaper') }
+              ].map((s) => (
+                <button
+                  key={s.id}
+                  onClick={() => onUpdate({ ...currentTheme, surface: s.id as any })}
+                  className={`p-3 border-2 rounded-xl text-center transition-all duration-200 font-semibold ${
+                    surface === s.id
+                      ? 'border-[var(--primary)] bg-[var(--primary)]/10 text-[var(--primary)] scale-105 shadow-sm'
+                      : 'border-[var(--border-color)] text-[var(--text-secondary)] hover:border-[var(--primary)]/30'
+                  }`}
+                >
+                  <span className="block text-xs">{s.label}</span>
+                </button>
+              ))}
+            </div>
+            <div className="mt-4 rounded-2xl border border-[var(--border-color)] bg-[var(--bg-body)] p-4">
+              <div className="rounded-xl border border-[var(--glass-border)] bg-[var(--bg-card)] p-4">
+                <div className="flex items-center justify-between">
+                  <div className="space-y-2">
+                    <div className="h-2 w-24 rounded-full bg-[var(--primary)]"></div>
+                    <div className="h-2 w-16 rounded-full bg-[var(--accent)]"></div>
+                  </div>
+                  <div className="text-xs font-bold text-[var(--text-muted)]">{t('uiPreview')}</div>
+                </div>
+              </div>
+            </div>
+          </div>
+
           {/* Color - Visual Palette */}
           <div>
             <label className="block text-sm font-bold mb-3 text-[var(--text-main)]">{t('systemColor')}</label>
-            <div className="flex gap-4 justify-center bg-[var(--bg-body)] p-5 rounded-2xl border border-[var(--border-color)] shadow-inner">
-               {['blue', 'green', 'purple', 'red'].map((c) => (
+            <div className="flex flex-wrap gap-3 justify-center bg-[var(--bg-body)] p-5 rounded-2xl border border-[var(--border-color)] shadow-inner">
+               {[
+                 { id: 'blue', grad: 'linear-gradient(135deg, #2563eb, #1e40af)' },
+                 { id: 'green', grad: 'linear-gradient(135deg, #10b981, #047857)' },
+                 { id: 'purple', grad: 'linear-gradient(135deg, #8b5cf6, #5b21b6)' },
+                 { id: 'red', grad: 'linear-gradient(135deg, #ef4444, #b91c1c)' },
+                 { id: 'teal', grad: 'linear-gradient(135deg, #14b8a6, #0f766e)' },
+                 { id: 'amber', grad: 'linear-gradient(135deg, #f59e0b, #b45309)' },
+                 { id: 'slate', grad: 'linear-gradient(135deg, #64748b, #334155)' },
+                 { id: 'rose', grad: 'linear-gradient(135deg, #f43f5e, #be123c)' }
+               ].map((c) => (
                  <button 
-                   key={c}
-                   onClick={() => onUpdate({...currentTheme, color: c as any})}
+                   key={c.id}
+                   onClick={() => onUpdate({...currentTheme, color: c.id as any})}
                    className={`w-14 h-14 rounded-full flex items-center justify-center transition-all duration-300 relative group`}
-                   style={{ 
-                       background: c === 'blue' ? 'linear-gradient(135deg, #3b82f6, #1e3a8a)' : 
-                                   c === 'green' ? 'linear-gradient(135deg, #10b981, #064e3b)' : 
-                                   c === 'purple' ? 'linear-gradient(135deg, #8b5cf6, #4c1d95)' : 
-                                   'linear-gradient(135deg, #ef4444, #7f1d1d)' 
-                   }}
+                   style={{ background: c.grad }}
                  >
                    <div className={`absolute inset-0 rounded-full bg-white opacity-0 group-hover:opacity-20 transition-opacity`}></div>
-                   {currentTheme.color === c && (
+                   {currentTheme.color === c.id && (
                        <div className="absolute inset-0 rounded-full ring-4 ring-[var(--bg-card)] ring-offset-2 ring-offset-[var(--primary)] animate-pulse-slow"></div>
                    )}
-                   {currentTheme.color === c && <CheckIcon className="text-white w-6 h-6 drop-shadow-md" />}
+                   {currentTheme.color === c.id && <CheckIcon className="text-white w-6 h-6 drop-shadow-md" />}
                  </button>
                ))}
             </div>
@@ -217,7 +257,7 @@ export const ThemeSettingsPanel: React.FC<ThemeSettingsPanelProps> = ({ currentT
           </div>
         </div>
 
-        <div className="p-5 bg-[var(--bg-body)] border-t border-[var(--border-color)]">
+        <div className="p-5 bg-[var(--bg-body)] border-t border-[var(--border-color)] shrink-0">
            <Button onClick={onClose} className="w-full shadow-lg h-12 text-base">{t('saveClose')}</Button>
         </div>
       </div>

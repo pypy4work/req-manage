@@ -296,8 +296,8 @@ export const UserManagement: React.FC = () => {
                         <img src={user.picture_url || `https://ui-avatars.com/api/?name=${user.full_name}&background=random`} className="w-16 h-16 rounded-full border-2 border-white/50 shadow-md object-cover" alt={user.full_name} />
                      </div>
                      <div className="min-w-0 flex-1">
-                        <h3 className="font-bold text-lg leading-tight truncate text-black dark:text-white">{user.full_name}</h3>
-                        <p className="text-sm font-bold mt-1 text-black/90 dark:text-gray-900">{user.full_employee_number}</p>
+                        <h3 className="font-bold text-lg leading-tight truncate text-white drop-shadow-sm">{user.full_name}</h3>
+                        <p className="text-sm font-bold mt-1 text-white/90 drop-shadow-sm">{user.full_employee_number}</p>
                      </div>
                   </div>
                   <div className="flex flex-col items-end justify-center gap-3 shrink-0 pl-2">

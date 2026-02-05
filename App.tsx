@@ -17,7 +17,7 @@ const EmployeeDashboard = React.lazy(() => import('./pages/EmployeeDashboard').t
 const ManagerDashboard = React.lazy(() => import('./pages/ManagerDashboard').then(module => ({ default: module.ManagerDashboard })));
 const AdminDashboard = React.lazy(() => import('./pages/AdminDashboard').then(module => ({ default: module.AdminDashboard })));
 
-const DEFAULT_THEME: ThemeConfig = { mode: 'light', color: 'blue', scale: 'normal' };
+const DEFAULT_THEME: ThemeConfig = { mode: 'light', color: 'blue', scale: 'normal', surface: 'glass' };
 
 // Separate component for the Welcome Overlay to use hooks properly
 const WelcomeOverlay: React.FC<{ user: User, settings: SystemSettings | null }> = ({ user, settings }) => {
@@ -85,7 +85,8 @@ function AppContent() {
   const [theme, setTheme] = useState<ThemeConfig>(() => {
      try {
          const stored = localStorage.getItem('sca_theme');
-         return stored ? JSON.parse(stored) : DEFAULT_THEME;
+         const parsed = stored ? JSON.parse(stored) : {};
+         return { ...DEFAULT_THEME, ...(parsed || {}) };
      } catch (e) {
          return DEFAULT_THEME;
      }
@@ -103,12 +104,104 @@ function AppContent() {
     return () => window.removeEventListener('hashchange', handleHashChange);
   }, []);
 
+  useEffect(() => {
+    if (user?.role === Role.EMPLOYEE && (route === '#/transfer-request' || route === '#/transfer-history')) {
+      window.location.hash = '#/requests';
+    }
+  }, [route, user]);
+
+  useEffect(() => {
+    if (!user) return;
+    const adminViewFromRoute = (r: string) => {
+      switch (r) {
+        case '#/settings': return 'settings';
+        case '#/users': return 'users';
+        case '#/request-types': return 'request-types';
+        case '#/database': return 'database';
+        case '#/org-structure': return 'org-structure';
+        case '#/system-health': return 'system-health';
+        case '#/transfers': return 'transfers';
+        case '#/allocation-criteria': return 'allocation-criteria';
+        case '#/permissions': return 'permissions';
+        case '#/stats': return 'stats';
+        default: return null;
+      }
+    };
+    const requiredPermissionByView: Record<string, PermissionKey> = {
+      'overview': 'admin:overview',
+      'stats': 'admin:stats',
+      'users': 'admin:users',
+      'request-types': 'admin:request-types',
+      'database': 'admin:database',
+      'org-structure': 'admin:org-structure',
+      'system-health': 'admin:settings',
+      'settings': 'admin:settings',
+      'transfers': 'admin:transfers',
+      'allocation-criteria': 'admin:allocation-criteria',
+      'permissions': 'admin:permissions'
+    };
+    const adminView = adminViewFromRoute(route);
+    if (!adminView) return;
+    if (user.role === Role.ADMIN) return;
+    const requiredPerm = requiredPermissionByView[adminView];
+    if (requiredPerm && !userPermissions.includes(requiredPerm)) {
+      setRoute('#/');
+      window.location.hash = '#/';
+    }
+  }, [route, user, userPermissions]);
+
+  useEffect(() => {
+    if (!user || user.role !== Role.MANAGER) return;
+    const managerViewFromRoute = (r: string) => {
+      switch (r) {
+        case '#/': return 'home';
+        case '#/my-requests': return 'my-requests';
+        case '#/approvals': return 'incoming';
+        case '#/kpis': return 'kpis';
+        default: return null;
+      }
+    };
+    const requiredPermissionByView: Record<string, PermissionKey> = {
+      'home': 'manager:home',
+      'my-requests': 'manager:my-requests',
+      'incoming': 'manager:incoming',
+      'kpis': 'manager:kpis'
+    };
+    const managerView = managerViewFromRoute(route);
+    if (!managerView) return;
+    const requiredPerm = requiredPermissionByView[managerView];
+    if (requiredPerm && !userPermissions.includes(requiredPerm)) {
+      const fallbackOrder: { href: string; perm: PermissionKey }[] = [
+        { href: '#/', perm: 'manager:home' },
+        { href: '#/my-requests', perm: 'manager:my-requests' },
+        { href: '#/approvals', perm: 'manager:incoming' },
+        { href: '#/kpis', perm: 'manager:kpis' }
+      ];
+      const fallback = fallbackOrder.find(item => userPermissions.includes(item.perm))?.href;
+      if (fallback && fallback !== route) {
+        setRoute(fallback);
+        window.location.hash = fallback;
+      }
+    }
+  }, [route, user, userPermissions]);
+
   const handleSettingsChange = (newSettings: SystemSettings) => { setSettings(newSettings); };
   const handleNavigate = () => { setNavKey(k => k + 1); };
+
+  const handleLogout = () => {
+      setUser(null);
+      setUserPermissions([]);
+      setRoute('#/');
+      window.location.hash = '#/';
+      try { localStorage.removeItem('sca_user_id'); } catch {}
+  };
 
   const handleLoginSuccess = (loggedInUser: User) => {
       setUser(loggedInUser);
       api.auth.getUserPermissions(loggedInUser.user_id).then(setUserPermissions).catch(() => setUserPermissions([]));
+      window.location.hash = '#/';
+      setRoute('#/');
+      try { localStorage.setItem('sca_user_id', String(loggedInUser.user_id)); } catch {}
       
       // Check if admin is root-level
       if (loggedInUser.role === Role.ADMIN) {
@@ -143,33 +236,64 @@ function AppContent() {
     // --- ADVANCED COLOR SYSTEM ---
     const palettes = {
       blue: { 
-          primary: '#3b82f6', primaryDark: '#1e3a8a', primaryRgb: '59, 130, 246',
-          sidebarFrom: '#1e3a8a', sidebarTo: '#172554', accent: '#60a5fa'
+          primary: '#2563eb', primaryDark: '#1e40af', primaryRgb: '37, 99, 235',
+          sidebarFrom: '#1e3a8a', sidebarTo: '#0f172a', accent: '#60a5fa'
       },
       green: { 
-          primary: '#10b981', primaryDark: '#064e3b', primaryRgb: '16, 185, 129',
+          primary: '#10b981', primaryDark: '#047857', primaryRgb: '16, 185, 129',
           sidebarFrom: '#065f46', sidebarTo: '#022c22', accent: '#34d399'
       },
       purple: { 
-          primary: '#8b5cf6', primaryDark: '#4c1d95', primaryRgb: '139, 92, 246',
-          sidebarFrom: '#5b21b6', sidebarTo: '#2e1065', accent: '#a78bfa'
+          primary: '#8b5cf6', primaryDark: '#5b21b6', primaryRgb: '139, 92, 246',
+          sidebarFrom: '#4c1d95', sidebarTo: '#2e1065', accent: '#a78bfa'
       },
       red: { 
-          primary: '#ef4444', primaryDark: '#7f1d1d', primaryRgb: '239, 68, 68',
-          sidebarFrom: '#991b1b', sidebarTo: '#450a0a', accent: '#f87171'
+          primary: '#ef4444', primaryDark: '#b91c1c', primaryRgb: '239, 68, 68',
+          sidebarFrom: '#7f1d1d', sidebarTo: '#450a0a', accent: '#f87171'
       },
+      teal: {
+          primary: '#14b8a6', primaryDark: '#0f766e', primaryRgb: '20, 184, 166',
+          sidebarFrom: '#0f766e', sidebarTo: '#134e4a', accent: '#5eead4'
+      },
+      amber: {
+          primary: '#f59e0b', primaryDark: '#b45309', primaryRgb: '245, 158, 11',
+          sidebarFrom: '#b45309', sidebarTo: '#78350f', accent: '#fbbf24'
+      },
+      slate: {
+          primary: '#64748b', primaryDark: '#334155', primaryRgb: '100, 116, 139',
+          sidebarFrom: '#334155', sidebarTo: '#0f172a', accent: '#94a3b8'
+      },
+      rose: {
+          primary: '#f43f5e', primaryDark: '#be123c', primaryRgb: '244, 63, 94',
+          sidebarFrom: '#be123c', sidebarTo: '#881337', accent: '#fb7185'
+      }
     };
     
     const lightPalette = { 
-        bgBody: '#f3f4f6', bgCard: 'rgba(255, 255, 255, 0.85)', 
-        textMain: '#111827', textSecondary: '#374151', textMuted: '#6b7280', 
-        border: '#e5e7eb', glassBorder: 'rgba(255, 255, 255, 0.6)'
+        bgBody: '#f1f5f9', 
+        textMain: '#0f172a', textSecondary: '#334155', textMuted: '#64748b', 
+        border: '#e2e8f0', glassBorder: 'rgba(255, 255, 255, 0.7)'
     };
     
     const darkPalette = { 
-        bgBody: '#0f172a', bgCard: 'rgba(30, 41, 59, 0.75)', 
+        bgBody: '#0b1220', 
         textMain: '#f8fafc', textSecondary: '#cbd5e1', textMuted: '#94a3b8', 
-        border: '#334155', glassBorder: 'rgba(255, 255, 255, 0.08)'
+        border: '#1f2937', glassBorder: 'rgba(255, 255, 255, 0.06)'
+    };
+
+    const surfacePresets = {
+      glass: {
+        light: { bgCard: 'rgba(255, 255, 255, 0.85)', glassBorder: 'rgba(255, 255, 255, 0.7)' },
+        dark: { bgCard: 'rgba(15, 23, 42, 0.72)', glassBorder: 'rgba(255, 255, 255, 0.06)' }
+      },
+      solid: {
+        light: { bgCard: '#ffffff', glassBorder: 'rgba(15, 23, 42, 0.08)' },
+        dark: { bgCard: '#0f172a', glassBorder: 'rgba(255, 255, 255, 0.08)' }
+      },
+      paper: {
+        light: { bgCard: '#f8fafc', glassBorder: 'rgba(15, 23, 42, 0.1)' },
+        dark: { bgCard: '#111827', glassBorder: 'rgba(255, 255, 255, 0.05)' }
+      }
     };
     
     const scales = {
@@ -178,10 +302,12 @@ function AppContent() {
       xl:     { sm: '1.125rem', base: '1.25rem', lg: '1.5rem', xl: '2rem', lh: '1.8' },
     };
     
-    const activeColor = palettes[theme.color];
+    const activeColor = palettes[theme.color] || palettes.blue;
     const activeScale = scales[theme.scale];
     const isDark = theme.mode === 'dark';
     const basePalette = isDark ? darkPalette : lightPalette;
+    const surface = theme.surface || 'glass';
+    const surfacePalette = surfacePresets[surface]?.[isDark ? 'dark' : 'light'] || surfacePresets.glass[isDark ? 'dark' : 'light'];
     
     const styleId = 'theme-styles';
     let styleTag = document.getElementById(styleId);
@@ -197,13 +323,13 @@ function AppContent() {
         --sidebar-from: ${activeColor.sidebarFrom};
         --sidebar-to: ${activeColor.sidebarTo};
         --bg-body: ${basePalette.bgBody};
-        --bg-card: ${basePalette.bgCard};
+        --bg-card: ${surfacePalette.bgCard};
         --bg-hover: ${isDark ? 'rgba(255, 255, 255, 0.05)' : 'rgba(0, 0, 0, 0.04)'};
         --text-main: ${basePalette.textMain};
         --text-secondary: ${basePalette.textSecondary};
         --text-muted: ${basePalette.textMuted};
         --border-color: ${basePalette.border};
-        --glass-border: ${basePalette.glassBorder};
+        --glass-border: ${surfacePalette.glassBorder};
         --font-size-sm: ${activeScale.sm};
         --font-size-base: ${activeScale.base};
         --font-size-lg: ${activeScale.lg};
@@ -215,7 +341,9 @@ function AppContent() {
         background-color: var(--bg-body); 
         color: var(--text-main); 
         line-height: var(--line-height-base);
-        background-image: ${isDark ? 'radial-gradient(circle at top right, rgba(var(--primary-rgb), 0.15), transparent 40%)' : 'radial-gradient(circle at top right, rgba(var(--primary-rgb), 0.08), transparent 40%)'};
+        background-image: ${isDark 
+          ? 'radial-gradient(circle at top left, rgba(var(--primary-rgb), 0.16), transparent 45%), radial-gradient(circle at top right, rgba(var(--primary-rgb), 0.08), transparent 40%)'
+          : 'radial-gradient(circle at top left, rgba(var(--primary-rgb), 0.08), transparent 45%), radial-gradient(circle at top right, rgba(var(--primary-rgb), 0.05), transparent 40%)'};
         background-attachment: fixed;
         transition: background-color var(--transition-speed) ease, color var(--transition-speed) ease;
       }
@@ -267,6 +395,21 @@ function AppContent() {
       .animate-progress-loading { animation: progress-loading 1.5s ease-in-out infinite; }
 
       ::placeholder { color: var(--text-muted) !important; opacity: 0.7; }
+
+      input, select, textarea {
+        color: var(--text-main);
+        caret-color: var(--text-main);
+      }
+      select {
+        background-color: var(--bg-card);
+      }
+      select option {
+        color: var(--text-main);
+        background-color: var(--bg-card);
+      }
+      input:disabled, select:disabled, textarea:disabled {
+        color: var(--text-muted);
+      }
     `;
     localStorage.setItem('sca_theme', JSON.stringify(theme));
   }, [theme]);
@@ -284,7 +427,7 @@ function AppContent() {
     if (route === '#/profile') {
       return (
         <ErrorBoundary>
-            <Layout user={user} currentRoute={route} onLogout={() => setUser(null)} onOpenTheme={() => setShowThemePanel(true)} settings={settings} onNavigate={handleNavigate}>
+            <Layout user={user} currentRoute={route} onLogout={handleLogout} onOpenTheme={() => setShowThemePanel(true)} settings={settings} permissions={userPermissions} onNavigate={handleNavigate}>
               <Profile user={user} settings={settings} />
             </Layout>
         </ErrorBoundary>
@@ -325,10 +468,27 @@ function AppContent() {
     const isAdminRoute = !!adminView;
     const hasPermission = (perm: PermissionKey) => userPermissions.includes(perm);
     const canAccessAdminView = adminView ? (user.role === Role.ADMIN || hasPermission(requiredPermissionByView[adminView])) : false;
+    const managerViewFromRoute = (r: string) => {
+      switch (r) {
+        case '#/': return 'home';
+        case '#/my-requests': return 'my-requests';
+        case '#/approvals': return 'incoming';
+        case '#/kpis': return 'kpis';
+        default: return null;
+      }
+    };
+    const requiredManagerPermissionByView: Record<string, PermissionKey> = {
+      'home': 'manager:home',
+      'my-requests': 'manager:my-requests',
+      'incoming': 'manager:incoming',
+      'kpis': 'manager:kpis'
+    };
+    const managerView = managerViewFromRoute(route);
+    const canAccessManagerView = managerView ? hasPermission(requiredManagerPermissionByView[managerView]) : true;
 
     return (
       <ErrorBoundary>
-          <Layout user={user} currentRoute={route} onLogout={() => { setUser(null); setUserPermissions([]); }} onOpenTheme={() => setShowThemePanel(true)} settings={settings} permissions={userPermissions} onNavigate={handleNavigate}>
+          <Layout user={user} currentRoute={route} onLogout={handleLogout} onOpenTheme={() => setShowThemePanel(true)} settings={settings} permissions={userPermissions} onNavigate={handleNavigate}>
             <Suspense fallback={<div className="flex items-center justify-center h-full"><Loader2 className="w-10 h-10 animate-spin text-[var(--primary)] drop-shadow-lg" /></div>}>
               {(user.role === Role.ADMIN || canAccessAdminView) && (
                 <AdminDashboard 
@@ -354,8 +514,23 @@ function AppContent() {
                   settings={settings}
                 />
               )}
-              {user.role === Role.MANAGER && !isAdminRoute && <ManagerDashboard key={`manager-${navKey}`} view={route === '#/approvals' ? 'approvals' : route === '#/my-requests' ? 'personal' : 'home'} user={user} />}
-              {user.role === Role.EMPLOYEE && !isAdminRoute && <EmployeeDashboard key={`employee-${navKey}`} user={user} view={route === '#/requests' ? 'requests' : route === '#/transfer-request' ? 'transfer-request' : route === '#/transfer-history' ? 'transfer-history' : 'home'} />}
+              {user.role === Role.MANAGER && !isAdminRoute && canAccessManagerView && (
+                managerView === 'incoming' ? (
+                  <ManagerDashboard key={`manager-${navKey}`} view="approvals" user={user} />
+                ) : managerView === 'kpis' ? (
+                  <ManagerDashboard key={`manager-${navKey}`} view="kpis" user={user} />
+                ) : managerView === 'my-requests' ? (
+                  <EmployeeDashboard key={`manager-employee-${navKey}`} user={user} view="requests" />
+                ) : (
+                  <EmployeeDashboard key={`manager-employee-${navKey}`} user={user} view="home" />
+                )
+              )}
+              {user.role === Role.MANAGER && !isAdminRoute && !canAccessManagerView && (
+                <div className="p-8 text-center text-[var(--text-muted)]">
+                  ليس لديك صلاحية للوصول إلى هذه الصفحة.
+                </div>
+              )}
+              {user.role === Role.EMPLOYEE && !isAdminRoute && <EmployeeDashboard key={`employee-${navKey}`} user={user} view={route === '#/requests' ? 'requests' : 'home'} />}
               {isAdminRoute && !canAccessAdminView && user.role !== Role.ADMIN && (
                 <div className="p-8 text-center text-[var(--text-muted)]">
                   ليس لديك صلاحية للوصول إلى هذه الصفحة.

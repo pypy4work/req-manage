@@ -17,7 +17,11 @@ export type PermissionKey =
   | 'admin:org-structure'
   | 'admin:database'
   | 'admin:settings'
-  | 'admin:permissions';
+  | 'admin:permissions'
+  | 'manager:home'
+  | 'manager:my-requests'
+  | 'manager:incoming'
+  | 'manager:kpis';
 
 export interface PermissionDefinition {
   key: PermissionKey;
@@ -372,6 +376,8 @@ export interface RequestDefinition {
   unit: UnitType;
   is_system?: boolean;
   fields: FormField[];
+  /** Optional info bar content shown in the request form (one item per line). */
+  info_bar_content?: string;
   
   // Relationships (Linking to global pools)
   linked_documents: { doc_def_id: number; required: boolean }[];
@@ -400,6 +406,8 @@ export interface AllowanceBalance {
   request_type_id: number;
   request_name: string;
   remaining: number;
+  total_entitlement?: number;
+  unit?: UnitType;
   
   // Aliases for UI components
   leave_name?: string;
@@ -570,8 +578,9 @@ export interface N8nWebhookResponse {
 // --- Theme ---
 export interface ThemeConfig {
   mode: 'light' | 'dark';
-  color: 'blue' | 'green' | 'purple' | 'red';
+  color: 'blue' | 'green' | 'purple' | 'red' | 'teal' | 'amber' | 'slate' | 'rose';
   scale: 'normal' | 'large' | 'xl';
+  surface?: 'glass' | 'solid' | 'paper';
 }
 
 // ==========================================
