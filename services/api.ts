@@ -941,10 +941,24 @@ export const api = {
           if (shouldUseBackend()) return await api_backend.admin.getUsers();
           return db_users;
       },
-      addUser: async (user: User) => { const hydratedUser = hydrateUserRelations(user); db_users.push({...hydratedUser, user_id: Date.now()}); },
-      updateUser: async (user: User) => { const idx = db_users.findIndex(x => x.user_id === user.user_id); if(idx !== -1) db_users[idx] = hydrateUserRelations(user); },
-      deleteUser: async (id: number) => { const idx = db_users.findIndex(x => x.user_id === id); if(idx !== -1) db_users.splice(idx, 1); },
-      importUsers: async (users: any[]) => {},
+      addUser: async (user: User) => {
+          if (shouldUseBackend()) return await api_backend.admin.addUser(user);
+          const hydratedUser = hydrateUserRelations(user);
+          db_users.push({ ...hydratedUser, user_id: Date.now() });
+      },
+      updateUser: async (user: User) => {
+          if (shouldUseBackend()) return await api_backend.admin.updateUser(user);
+          const idx = db_users.findIndex(x => x.user_id === user.user_id);
+          if (idx !== -1) db_users[idx] = hydrateUserRelations(user);
+      },
+      deleteUser: async (id: number) => {
+          if (shouldUseBackend()) return await api_backend.admin.deleteUser(id);
+          const idx = db_users.findIndex(x => x.user_id === id);
+          if (idx !== -1) db_users.splice(idx, 1);
+      },
+      importUsers: async (users: any[]) => {
+          if (shouldUseBackend()) return await api_backend.admin.importUsers(users);
+      },
       getSuffixes: async () => db_employee_suffixes,
       getJobTitles: async () => {
           if (shouldUseBackend()) return await api_backend.admin.getJobTitles();

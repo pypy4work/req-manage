@@ -134,6 +134,28 @@ export const api_backend = {
     getUsers: async () => {
       return await fetch_wrapper('/admin/users');
     },
+    addUser: async (user: User) => {
+      return await fetch_wrapper('/admin/users', {
+        method: 'POST',
+        body: JSON.stringify(user)
+      });
+    },
+    updateUser: async (user: User) => {
+      if (!user?.user_id) throw new Error('Missing user_id for update.');
+      return await fetch_wrapper(`/admin/users/${user.user_id}`, {
+        method: 'PUT',
+        body: JSON.stringify(user)
+      });
+    },
+    deleteUser: async (id: number) => {
+      return await fetch_wrapper(`/admin/users/${id}`, { method: 'DELETE' });
+    },
+    importUsers: async (users: any[]) => {
+      return await fetch_wrapper('/admin/users/import', {
+        method: 'POST',
+        body: JSON.stringify({ users })
+      });
+    },
 
     getOrgUnits: async (forTransfer?: boolean) => {
       const qs = forTransfer ? '?forTransfer=1' : '';

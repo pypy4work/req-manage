@@ -4,6 +4,14 @@ const { query, getDialect, insertAndGetId, withTransaction } = require('../servi
 const { requirePermission } = require('../rbac');
 const { requireSupabaseActive } = require('../db-guards');
 const SAFE_TABLE_RE = /^[a-zA-Z0-9_]+$/;
+const hasOwn = (obj, key) => Object.prototype.hasOwnProperty.call(obj || {}, key);
+const toNull = (val) => (val === undefined || val === '' ? null : val);
+const toNumberOrNull = (val) => {
+  if (val === undefined || val === null || val === '') return null;
+  const num = Number(val);
+  return Number.isNaN(num) ? null : num;
+};
+const toBool = (val) => val === true || val === 1 || val === '1' || val === 'true';
 
 const DEFAULT_SETTINGS = {
   setting_id: 1,
@@ -251,16 +259,186 @@ router.get('/job-grades', requirePermission('admin:org-structure'), async (req, 
 // POST /api/admin/users
 router.post('/users', requirePermission('admin:users'), async (req, res) => {
   try {
-    const { full_name, username, email, role, org_unit_id } = req.body;
-    const sqlText = 'INSERT INTO sca.users (full_name, username, email, role, org_unit_id) VALUES (@FullName, @Username, @Email, @Role, @OrgUnitId)';
+    const payload = req.body || {};
+    const sqlText = `INSERT INTO sca.users (
+        employee_number,
+        full_employee_number,
+        full_name,
+        national_id,
+        username,
+        email,
+        phone_number,
+        job_id,
+        grade_id,
+        type_id,
+        org_unit_id,
+        role,
+        salary,
+        picture_url,
+        join_date,
+        birth_date,
+        is_2fa_enabled
+      ) VALUES (
+        @EmployeeNumber,
+        @FullEmployeeNumber,
+        @FullName,
+        @NationalId,
+        @Username,
+        @Email,
+        @PhoneNumber,
+        @JobId,
+        @GradeId,
+        @TypeId,
+        @OrgUnitId,
+        @Role,
+        @Salary,
+        @PictureUrl,
+        @JoinDate,
+        @BirthDate,
+        @Is2fa
+      )`;
+    const roleValue = payload.role || payload.role_name || 'Employee';
     const userId = await insertAndGetId(sqlText, {
-      FullName: full_name,
-      Username: username,
-      Email: email,
-      Role: role,
-      OrgUnitId: org_unit_id || null
+      EmployeeNumber: toNull(payload.employee_number || payload.employee_id),
+      FullEmployeeNumber: toNull(payload.full_employee_number),
+      FullName: payload.full_name,
+      NationalId: toNull(payload.national_id),
+      Username: payload.username,
+      Email: toNull(payload.email),
+      PhoneNumber: toNull(payload.phone_number),
+      JobId: toNumberOrNull(payload.job_id),
+      GradeId: toNumberOrNull(payload.grade_id),
+      TypeId: toNumberOrNull(payload.type_id),
+      OrgUnitId: toNumberOrNull(payload.org_unit_id),
+      Role: roleValue,
+      Salary: toNumberOrNull(payload.salary),
+      PictureUrl: toNull(payload.picture_url),
+      JoinDate: toNull(payload.join_date),
+      BirthDate: toNull(payload.birth_date),
+      Is2fa: toBool(payload.is_2fa_enabled) ? (getDialect() === 'postgres' ? true : 1) : (getDialect() === 'postgres' ? false : 0)
     }, 'user_id');
     res.json({ user_id: userId });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// PUT /api/admin/users/:id
+router.put('/users/:id', requirePermission('admin:users'), async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (!id) return res.status(400).json({ error: 'Invalid user id.' });
+
+    const payload = req.body || {};
+    const updates = [];
+    const params = { Id: id };
+
+    const setField = (key, column, value) => {
+      updates.push(`${column} = @${key}`);
+      params[key] = value;
+    };
+
+    if (hasOwn(payload, 'employee_number') || hasOwn(payload, 'employee_id')) {
+      setField('EmployeeNumber', 'employee_number', toNull(payload.employee_number || payload.employee_id));
+    }
+    if (hasOwn(payload, 'full_employee_number')) setField('FullEmployeeNumber', 'full_employee_number', toNull(payload.full_employee_number));
+    if (hasOwn(payload, 'full_name')) setField('FullName', 'full_name', toNull(payload.full_name));
+    if (hasOwn(payload, 'national_id')) setField('NationalId', 'national_id', toNull(payload.national_id));
+    if (hasOwn(payload, 'username')) setField('Username', 'username', toNull(payload.username));
+    if (hasOwn(payload, 'email')) setField('Email', 'email', toNull(payload.email));
+    if (hasOwn(payload, 'phone_number')) setField('PhoneNumber', 'phone_number', toNull(payload.phone_number));
+    if (hasOwn(payload, 'job_id')) setField('JobId', 'job_id', toNumberOrNull(payload.job_id));
+    if (hasOwn(payload, 'grade_id')) setField('GradeId', 'grade_id', toNumberOrNull(payload.grade_id));
+    if (hasOwn(payload, 'type_id')) setField('TypeId', 'type_id', toNumberOrNull(payload.type_id));
+    if (hasOwn(payload, 'org_unit_id')) setField('OrgUnitId', 'org_unit_id', toNumberOrNull(payload.org_unit_id));
+    if (hasOwn(payload, 'role')) setField('Role', 'role', toNull(payload.role));
+    if (hasOwn(payload, 'salary')) setField('Salary', 'salary', toNumberOrNull(payload.salary));
+    if (hasOwn(payload, 'picture_url')) setField('PictureUrl', 'picture_url', toNull(payload.picture_url));
+    if (hasOwn(payload, 'join_date')) setField('JoinDate', 'join_date', toNull(payload.join_date));
+    if (hasOwn(payload, 'birth_date')) setField('BirthDate', 'birth_date', toNull(payload.birth_date));
+    if (hasOwn(payload, 'is_2fa_enabled')) {
+      setField('Is2fa', 'is_2fa_enabled', toBool(payload.is_2fa_enabled) ? (getDialect() === 'postgres' ? true : 1) : (getDialect() === 'postgres' ? false : 0));
+    }
+
+    if (updates.length === 0) return res.status(400).json({ error: 'No fields to update.' });
+
+    await query(`UPDATE sca.users SET ${updates.join(', ')} WHERE user_id = @Id`, params);
+    res.json({ success: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// POST /api/admin/users/import
+router.post('/users/import', requirePermission('admin:users'), async (req, res) => {
+  try {
+    const payload = req.body || {};
+    const users = Array.isArray(payload) ? payload : (Array.isArray(payload.users) ? payload.users : []);
+    if (!users.length) return res.status(400).json({ error: 'No users provided.' });
+
+    const results = [];
+    for (const user of users) {
+      try {
+        const sqlText = `INSERT INTO sca.users (
+            employee_number,
+            full_employee_number,
+            full_name,
+            national_id,
+            username,
+            email,
+            phone_number,
+            job_id,
+            grade_id,
+            type_id,
+            org_unit_id,
+            role,
+            salary,
+            picture_url,
+            join_date,
+            birth_date,
+            is_2fa_enabled
+          ) VALUES (
+            @EmployeeNumber,
+            @FullEmployeeNumber,
+            @FullName,
+            @NationalId,
+            @Username,
+            @Email,
+            @PhoneNumber,
+            @JobId,
+            @GradeId,
+            @TypeId,
+            @OrgUnitId,
+            @Role,
+            @Salary,
+            @PictureUrl,
+            @JoinDate,
+            @BirthDate,
+            @Is2fa
+          )`;
+        const roleValue = user.role || user.role_name || 'Employee';
+        const newId = await insertAndGetId(sqlText, {
+          EmployeeNumber: toNull(user.employee_number || user.employee_id),
+          FullEmployeeNumber: toNull(user.full_employee_number),
+          FullName: user.full_name,
+          NationalId: toNull(user.national_id),
+          Username: user.username,
+          Email: toNull(user.email),
+          PhoneNumber: toNull(user.phone_number),
+          JobId: toNumberOrNull(user.job_id),
+          GradeId: toNumberOrNull(user.grade_id),
+          TypeId: toNumberOrNull(user.type_id),
+          OrgUnitId: toNumberOrNull(user.org_unit_id),
+          Role: roleValue,
+          Salary: toNumberOrNull(user.salary),
+          PictureUrl: toNull(user.picture_url),
+          JoinDate: toNull(user.join_date),
+          BirthDate: toNull(user.birth_date),
+          Is2fa: toBool(user.is_2fa_enabled) ? (getDialect() === 'postgres' ? true : 1) : (getDialect() === 'postgres' ? false : 0)
+        }, 'user_id');
+        results.push({ status: 'ok', user_id: newId, username: user.username });
+      } catch (err) {
+        results.push({ status: 'error', username: user?.username, error: err.message || String(err) });
+      }
+    }
+
+    res.json({ success: true, processed: results.length, results });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
