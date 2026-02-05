@@ -40,6 +40,13 @@ function validateSupabaseEnv() {
   const supabaseUrl = process.env.SUPABASE_URL || '';
   const supabaseKey = process.env.SUPABASE_ANON_KEY || '';
   const supabaseConfig = getSupabaseConfig();
+  const poolerUrl =
+    process.env.SUPABASE_POOLER_URL ||
+    process.env.SUPABASE_DB_URL_POOLER ||
+    process.env.POSTGRES_POOLER_URL ||
+    process.env.PGPOOLER_URL ||
+    process.env.PG_BOUNCER_URL ||
+    '';
 
   if (!supabaseUrl) {
     warnings.push('SUPABASE_URL is missing. Frontend clients should not use direct DB access.');
@@ -64,6 +71,9 @@ function validateSupabaseEnv() {
   if (connCheck.hostname && !connCheck.hostname.includes('supabase')) {
     warnings.push('Postgres host does not appear to be a Supabase host. Verify connection string.');
   }
+  if (connCheck.hostname && connCheck.hostname.startsWith('db.') && connCheck.hostname.endsWith('.supabase.co') && !poolerUrl) {
+    warnings.push('Using direct Supabase DB host without a pooler. Some serverless environments cannot resolve IPv6-only hosts. Prefer SUPABASE_POOLER_URL.');
+  }
 
   return {
     errors,
@@ -71,7 +81,8 @@ function validateSupabaseEnv() {
     details: {
       supabaseUrl: supabaseUrl ? '[set]' : '[missing]',
       supabaseAnonKey: supabaseKey ? '[set]' : '[missing]',
-      postgresConnectionString: supabaseConfig.connectionString ? '[set]' : '[missing]'
+      postgresConnectionString: supabaseConfig.connectionString ? '[set]' : '[missing]',
+      poolerConnectionString: poolerUrl ? '[set]' : '[missing]'
     }
   };
 }

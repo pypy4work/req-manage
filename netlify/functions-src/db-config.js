@@ -4,12 +4,22 @@ const DEFAULT_PORTS = {
 };
 
 function getSupabaseConfig() {
-  const connectionString =
+  const poolerConnectionString =
+    process.env.SUPABASE_POOLER_URL ||
+    process.env.SUPABASE_DB_URL_POOLER ||
+    process.env.POSTGRES_POOLER_URL ||
+    process.env.PGPOOLER_URL ||
+    process.env.PG_BOUNCER_URL ||
+    '';
+
+  const directConnectionString =
     process.env.SUPABASE_DB_URL ||
     process.env.POSTGRES_URL ||
     process.env.DATABASE_URL ||
     process.env.PG_CONNECTION_STRING ||
     '';
+
+  const connectionString = poolerConnectionString || directConnectionString || '';
 
   const host = process.env.DB_HOST || process.env.PGHOST || '';
   const port = process.env.DB_PORT || process.env.PGPORT || DEFAULT_PORTS.postgres;
