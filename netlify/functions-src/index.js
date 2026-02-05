@@ -31,11 +31,16 @@ const app = express();
 app.set('trust proxy', true);
 
 // API prefix:
-// - Netlify Functions (serverless): prefer root paths to avoid double /api
+// - Serverless (Netlify/AWS Lambda): prefer root paths to avoid double /api
 // - Traditional server (Render/Railway/local): keep /api prefix
-const isNetlify = !!process.env.NETLIFY;
+const isServerless =
+  !!process.env.NETLIFY ||
+  !!process.env.NETLIFY_DEV ||
+  !!process.env.NETLIFY_LOCAL ||
+  !!process.env.AWS_LAMBDA_FUNCTION_NAME ||
+  !!process.env.LAMBDA_TASK_ROOT;
 const rawApiPrefix = process.env.API_PREFIX;
-const apiPrefix = rawApiPrefix !== undefined ? rawApiPrefix : (isNetlify ? '' : '/api');
+const apiPrefix = rawApiPrefix !== undefined ? rawApiPrefix : (isServerless ? '' : '/api');
 const normalizePrefix = (prefix) => {
   if (!prefix) return '';
   const trimmed = prefix.endsWith('/') ? prefix.slice(0, -1) : prefix;
@@ -75,6 +80,10 @@ app.use(`${apiBase}/auth`, authRoutes);
 app.use(`${apiBase}/employee`, employeeRoutes);
 app.use(`${apiBase}/manager`, managerRoutes);
 app.use(`${apiBase}/system`, systemRoutes);
+// Fallback: if API prefix mismatch, still expose /system routes.
+if (apiBase !== '/system' && apiBase !== '') {
+  app.use('/system', systemRoutes);
+}
 
 app.get('/health', async (req, res) => {
   await initDbRouter();
