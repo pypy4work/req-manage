@@ -1,4 +1,4 @@
-# دليل النشر على Supabase (Postgres) + Netlify (Frontend)
+# دليل النشر الاخير على Supabase (Postgres) + Netlify (Frontend)
 
 هذا الدليل يشرح كيفية نشر التطبيق على:
 - **Supabase**: قاعدة بيانات Postgres + Backend API (اختياري)
@@ -92,7 +92,7 @@
 
 1. مجلد الدوال: `netlify/functions`
 2. ملف الدالة الرئيسي: `netlify/functions/api.js`
-3. كود الـ API موجود في: `netlify/functions/src`
+3. كود الـ API موجود في: `netlify/functions-src`
 4. يوجد Redirect يوجّه `/api/*` إلى الدالة تلقائياً (في `netlify.toml` و `public/_redirects`)
 
 > النتيجة: يمكنك استدعاء الـ API من الواجهة باستخدام المسار `/api/...` بدون كتابة مسار Functions الكامل.

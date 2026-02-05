@@ -1,5 +1,5 @@
 const serverless = require('serverless-http');
-const app = require('./src/index');
+const app = require('../functions-src/index');
 
 const handler = serverless(app, {
   basePath: '/.netlify/functions/api'
