@@ -78,6 +78,7 @@ export interface SystemSettings {
   setting_id: number;
   mode_type: ModeType;
   n8n_webhook_url: string;
+  appeals_webhook_url?: string;
   system_title: string;
   system_subtitle: string;
   system_logo_url: string;
@@ -466,6 +467,24 @@ export interface GenericRequest {
   is_edited?: boolean; // NEW: Track if user modified it
 }
 export type LeaveRequest = GenericRequest;
+
+// --- Appeals ---
+export interface AppealAttachment {
+  file_name: string;
+  file_url: string;
+  mime_type: string;
+}
+
+export interface RequestAppealPayload {
+  request_id: number;
+  user_id: number;
+  employee_name?: string;
+  is_transfer?: boolean;
+  reason: string;
+  attachments?: AppealAttachment[];
+  request_snapshot?: Partial<GenericRequest>;
+  submitted_at?: string;
+}
 
 export interface RequestAuditLog {
   log_id: number;

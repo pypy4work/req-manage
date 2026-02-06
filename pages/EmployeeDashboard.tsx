@@ -1,11 +1,12 @@
 
 import React, { useState, useEffect } from 'react';
-import { User, LeaveBalance, LeaveRequest, RequestDefinition, RequestStatus } from '../types';
+import { User, LeaveBalance, LeaveRequest, RequestDefinition, RequestStatus, UploadedFile } from '../types';
 import { api } from '../services/api';
-import { Card, CardContent, Button, Badge } from '../components/ui/UIComponents';
-import { Plus, Calendar, Watch, FileText, CheckCircle2, XCircle, Clock, Bot, UserCheck, ShieldAlert, Edit2, X, ExternalLink } from 'lucide-react';
+import { Card, CardContent, Button, Badge, Textarea } from '../components/ui/UIComponents';
+import { Plus, Calendar, Watch, FileText, CheckCircle2, XCircle, Clock, Bot, UserCheck, ShieldAlert, Edit2, X, UploadCloud, Trash2, AlertTriangle, Send, Paperclip } from 'lucide-react';
 import { RequestForm } from '../components/employee/RequestForm';
 import { useLanguage } from '../contexts/LanguageContext';
+import { useNotification } from '../components/ui/NotificationSystem';
 
 interface EmployeeDashboardProps {
   user: User;
@@ -21,8 +22,13 @@ export const EmployeeDashboard: React.FC<EmployeeDashboardProps> = ({ user, view
   // NEW: State for editing/viewing details
   const [selectedRequest, setSelectedRequest] = useState<LeaveRequest | null>(null);
   const [isEditing, setIsEditing] = useState(false);
+  const [appealRequest, setAppealRequest] = useState<LeaveRequest | null>(null);
+  const [appealReason, setAppealReason] = useState('');
+  const [appealAttachments, setAppealAttachments] = useState<UploadedFile[]>([]);
+  const [isSubmittingAppeal, setIsSubmittingAppeal] = useState(false);
 
   const { t, dir } = useLanguage();
+  const { notify } = useNotification();
   const normalizedBalances = balances.map((b) => {
       const name = b.leave_name || b.request_name || '';
       const remaining = (b.remaining_days ?? b.remaining ?? 0) as number;
@@ -58,9 +64,129 @@ export const EmployeeDashboard: React.FC<EmployeeDashboardProps> = ({ user, view
       await fetchData();
   };
 
+  const APPEAL_MAX_FILES = 5;
+  const APPEAL_MAX_FILE_MB = 4;
+
+  const getAppealMeta = (req: LeaveRequest) => {
+      const meta = (req.custom_data as any)?.appeal;
+      return meta || null;
+  };
+
+  const openAppealModal = (req: LeaveRequest) => {
+      const meta = getAppealMeta(req);
+      setAppealRequest(req);
+      if (meta) {
+          setAppealReason(meta.reason || '');
+          const mapped = Array.isArray(meta.attachments)
+              ? meta.attachments.map((a: any, i: number) => ({
+                  fileId: `appeal_meta_${i}`,
+                  documentId: 0,
+                  fileName: a.file_name || `Attachment ${i + 1}`,
+                  fileUrl: a.file_url || '',
+                  mimeType: a.mime_type || ''
+              }))
+              : [];
+          setAppealAttachments(mapped);
+      } else {
+          setAppealReason('');
+          setAppealAttachments([]);
+      }
+  };
+
+  const closeAppealModal = () => {
+      setAppealRequest(null);
+      setAppealReason('');
+      setAppealAttachments([]);
+  };
+
+  const handleAppealFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+      const files = Array.from(e.target.files || []);
+      if (files.length === 0) return;
+      const remaining = Math.max(0, APPEAL_MAX_FILES - appealAttachments.length);
+      if (remaining === 0) {
+          notify({ type: 'warning', title: t('warning'), message: t('appealMaxFiles') });
+          return;
+      }
+      files.slice(0, remaining).forEach((file, idx) => {
+          if (file.size > APPEAL_MAX_FILE_MB * 1024 * 1024) {
+              notify({ type: 'warning', title: t('warning'), message: t('appealFileTooLarge') });
+              return;
+          }
+          const reader = new FileReader();
+          reader.onload = (ev) => {
+              if (!ev.target?.result) return;
+              const newFile: UploadedFile = {
+                  fileId: `appeal_${Date.now()}_${idx}`,
+                  documentId: 0,
+                  fileName: file.name,
+                  fileUrl: ev.target.result as string,
+                  mimeType: file.type
+              };
+              setAppealAttachments(prev => [...prev, newFile]);
+          };
+          reader.readAsDataURL(file);
+      });
+      e.target.value = '';
+  };
+
+  const removeAppealFile = (fileId: string) => {
+      setAppealAttachments(prev => prev.filter(f => f.fileId !== fileId));
+  };
+
+  const handleSubmitAppeal = async () => {
+      if (!appealRequest) return;
+      const trimmedReason = appealReason.trim();
+      if (!trimmedReason) {
+          notify({ type: 'warning', title: t('warning'), message: t('appealReasonRequired') });
+          return;
+      }
+      setIsSubmittingAppeal(true);
+      try {
+          const submittedAt = new Date().toISOString();
+          await api.employee.submitAppeal({
+              request: appealRequest,
+              reason: trimmedReason,
+              attachments: appealAttachments,
+              is_transfer: !!(appealRequest as any).transfer_id
+          });
+
+          const normalizedAttachments = appealAttachments.map((f, idx) => ({
+              file_name: f.fileName,
+              file_url: f.fileUrl,
+              mime_type: f.mimeType,
+              order: idx + 1
+          }));
+
+          setRequests(prev => prev.map(r => {
+              if (r.request_id !== appealRequest.request_id) return r;
+              return {
+                  ...r,
+                  custom_data: {
+                      ...(r.custom_data || {}),
+                      appeal: {
+                          status: 'SUBMITTED',
+                          submitted_at: submittedAt,
+                          reason: trimmedReason,
+                          attachments: normalizedAttachments
+                      }
+                  }
+              };
+          }));
+
+          notify({ type: 'success', title: t('appealSent'), message: t('appealSentDesc') });
+          closeAppealModal();
+      } catch (error: any) {
+          notify({ type: 'error', title: t('error'), message: error?.message || t('appealFailed') });
+      } finally {
+          setIsSubmittingAppeal(false);
+      }
+  };
+
   const renderDecisionInfo = (req: LeaveRequest) => {
       if (req.status === RequestStatus.PENDING) return null;
       const isRejected = req.status === RequestStatus.REJECTED;
+      const appealMeta = getAppealMeta(req);
+      const hasAppeal = !!appealMeta?.submitted_at;
       let Icon = UserCheck; let label = 'Manager';
       if (req.decision_by === 'AI_Manager') { Icon = Bot; label = 'AI Auto-Decision'; }
       if (req.decision_by === 'System_Decision') { Icon = ShieldAlert; label = 'System Rule'; }
@@ -80,6 +206,12 @@ export const EmployeeDashboard: React.FC<EmployeeDashboardProps> = ({ user, view
               <div className="text-xs text-[var(--text-secondary)] leading-relaxed pl-1 pr-1 border-l-2 border-transparent">
                   {req.rejection_reason || 'System requirements met.'}
               </div>
+
+              {isRejected && (
+                  <div className="mt-2 text-[10px] text-[var(--text-muted)]">
+                      {hasAppeal ? `${t('appealSubmittedAt')} ${new Date(appealMeta.submitted_at).toLocaleString('en-GB')}` : t('appealAvailable')}
+                  </div>
+              )}
               
               <div className="mt-2 pt-2 border-t border-black/5 dark:border-white/5 flex items-center justify-end">
                   <div className={`flex items-center gap-1.5 text-[10px] font-bold px-2 py-0.5 rounded-full border bg-white dark:bg-black/20 ${isRejected ? 'text-red-600 border-red-100' : 'text-green-600 border-green-100'}`}>
@@ -198,6 +330,150 @@ export const EmployeeDashboard: React.FC<EmployeeDashboardProps> = ({ user, view
       );
   };
 
+  const AppealModal = () => {
+      if (!appealRequest) return null;
+      const isTransfer = (appealRequest as any).transfer_id != null;
+      const appealMeta = getAppealMeta(appealRequest);
+      const isSubmitted = !!appealMeta?.submitted_at;
+
+      return (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in duration-200">
+              <div className="bg-[var(--bg-card)] w-full max-w-2xl rounded-2xl shadow-2xl border border-[var(--border-color)] overflow-hidden flex flex-col max-h-[90vh]">
+                  <div className="p-5 border-b border-[var(--border-color)] flex justify-between items-center bg-[var(--bg-body)]">
+                      <h3 className="font-bold text-lg flex items-center gap-2 text-[var(--text-main)]">
+                          <AlertTriangle className="w-5 h-5 text-rose-500" /> {t('appealTitle')} #{appealRequest.request_id}
+                      </h3>
+                      <button onClick={closeAppealModal} className="p-1 rounded-full hover:bg-red-100 text-[var(--text-muted)] hover:text-red-500 transition-colors"><X className="w-6 h-6" /></button>
+                  </div>
+
+                  <div className="overflow-y-auto p-6 space-y-6">
+                      {/* Request Summary */}
+                      <div className="p-4 rounded-xl border border-[var(--border-color)] bg-[var(--bg-body)]">
+                          <div className="flex justify-between items-start gap-3">
+                              <div>
+                                  <h4 className="text-lg font-bold text-[var(--text-main)]">{appealRequest.leave_name}</h4>
+                                  <p className="text-xs text-[var(--text-muted)] mt-1">#{appealRequest.request_id}</p>
+                              </div>
+                              <Badge status={appealRequest.status} />
+                          </div>
+
+                          {!isTransfer && (
+                              <div className="grid grid-cols-2 gap-3 mt-4">
+                                  <div className="p-3 bg-[var(--bg-card)] rounded-lg border border-[var(--border-color)]">
+                                      <span className="text-xs font-bold text-[var(--text-muted)] uppercase block mb-1">Start</span>
+                                      <span className="font-mono text-sm">{appealRequest.start_date}</span>
+                                  </div>
+                                  <div className="p-3 bg-[var(--bg-card)] rounded-lg border border-[var(--border-color)]">
+                                      <span className="text-xs font-bold text-[var(--text-muted)] uppercase block mb-1">End</span>
+                                      <span className="font-mono text-sm">{appealRequest.end_date || '-'}</span>
+                                  </div>
+                                  <div className="p-3 bg-[var(--bg-card)] rounded-lg border border-[var(--border-color)] col-span-2">
+                                      <span className="text-xs font-bold text-[var(--text-muted)] uppercase block mb-1">Duration</span>
+                                      <span className="text-sm">{appealRequest.duration} {appealRequest.unit === 'days' ? t('days') : t('hours')}</span>
+                                  </div>
+                              </div>
+                          )}
+
+                          {isTransfer && (() => {
+                              const tr = appealRequest as any;
+                              const cd = tr.custom_data || {};
+                              const reason = cd.reason_for_transfer ?? tr.reason_for_transfer;
+                              const prefsRaw = cd.preferred_units ?? tr.preferred_units ?? [];
+                              const prefs = Array.isArray(prefsRaw)
+                                  ? prefsRaw.filter((p: any) => p?.unit_id).sort((a: any, b: any) => (a.preference_order ?? 0) - (b.preference_order ?? 0))
+                                  : [];
+                              return (
+                                  <div className="space-y-3 mt-4">
+                                      {reason && (
+                                          <div className="p-3 bg-[var(--bg-card)] rounded-lg border border-[var(--border-color)]">
+                                              <h5 className="font-bold text-xs mb-1 text-[var(--text-main)]">سبب التنقل</h5>
+                                              <p className="text-sm text-[var(--text-secondary)] whitespace-pre-wrap">{reason}</p>
+                                          </div>
+                                      )}
+                                      {prefs.length > 0 && (
+                                          <div className="p-3 bg-[var(--bg-card)] rounded-lg border border-[var(--border-color)]">
+                                              <h5 className="font-bold text-xs mb-1 text-[var(--text-main)]">الوحدات المفضلة</h5>
+                                              <ol className="list-decimal list-inside space-y-1 text-sm text-[var(--text-secondary)]">
+                                                  {prefs.map((p: any, i: number) => (
+                                                      <li key={`${p.unit_id ?? 'unit'}-${i}`}>{p.unit_name || 'غير محددة'}</li>
+                                                  ))}
+                                              </ol>
+                                          </div>
+                                      )}
+                                  </div>
+                              );
+                          })()}
+
+                          {appealRequest.rejection_reason && (
+                              <div className="mt-4 p-3 bg-rose-50 dark:bg-rose-900/10 rounded-lg border border-rose-200 dark:border-rose-800">
+                                  <p className="text-xs font-bold text-rose-600 mb-1">{t('rejectionReason')}</p>
+                                  <p className="text-sm text-[var(--text-secondary)] whitespace-pre-wrap">{appealRequest.rejection_reason}</p>
+                              </div>
+                          )}
+                      </div>
+
+                      {/* Appeal Reason */}
+                      <div>
+                          <label className="block text-sm font-bold mb-2 text-[var(--text-main)]">{t('appealReason')}</label>
+                          <Textarea
+                              value={appealReason}
+                              onChange={(e) => setAppealReason(e.target.value)}
+                              placeholder={t('appealReasonPlaceholder')}
+                              disabled={isSubmitted}
+                              className={isSubmitted ? 'opacity-70' : ''}
+                          />
+                          {isSubmitted && (
+                              <p className="text-[10px] text-[var(--text-muted)] mt-2">{t('appealAlreadySubmitted')}</p>
+                          )}
+                      </div>
+
+                      {/* Attachments */}
+                      <div>
+                          <label className="block text-sm font-bold mb-2 text-[var(--text-main)] flex items-center gap-2">
+                              <Paperclip className="w-4 h-4" /> {t('appealAttachments')}
+                          </label>
+                          <div className="space-y-2">
+                              {appealAttachments.length === 0 && (
+                                  <div className="text-xs text-[var(--text-muted)]">{t('appealNoAttachments')}</div>
+                              )}
+                              {appealAttachments.map((file) => (
+                                  <div key={file.fileId} className="flex items-center justify-between gap-2 bg-[var(--bg-body)] border border-[var(--border-color)] rounded-lg px-3 py-2">
+                                      <a href={file.fileUrl} target="_blank" rel="noreferrer" className="text-sm text-[var(--text-main)] truncate hover:underline">
+                                          {file.fileName}
+                                      </a>
+                                      {!isSubmitted && (
+                                          <button onClick={() => removeAppealFile(file.fileId)} className="p-1 rounded-full hover:bg-red-50 text-[var(--text-muted)] hover:text-red-500 transition-colors">
+                                              <Trash2 className="w-4 h-4" />
+                                          </button>
+                                      )}
+                                  </div>
+                              ))}
+                          </div>
+                          {!isSubmitted && (
+                              <div className="mt-3">
+                                  <label className="inline-flex items-center gap-2 text-xs font-bold px-3 py-2 rounded-lg border border-dashed border-[var(--border-color)] cursor-pointer hover:border-[var(--primary)] transition-colors">
+                                      <UploadCloud className="w-4 h-4" /> {t('appealAddAttachment')}
+                                      <input type="file" className="hidden" multiple onChange={handleAppealFileUpload} />
+                                  </label>
+                                  <p className="text-[10px] text-[var(--text-muted)] mt-2">{t('appealAttachmentHint')}</p>
+                              </div>
+                          )}
+                      </div>
+                  </div>
+
+                  <div className="p-5 border-t border-[var(--border-color)] bg-[var(--bg-body)] flex gap-3 justify-end">
+                      {!isSubmitted && (
+                          <Button className="flex-1 bg-rose-600 hover:bg-rose-700 text-white shadow-lg" onClick={handleSubmitAppeal} isLoading={isSubmittingAppeal}>
+                              <Send className="w-4 h-4 mr-2 rtl:ml-2" /> {t('appealSubmit')}
+                          </Button>
+                      )}
+                      <Button variant="ghost" onClick={closeAppealModal}>{t('cancel')}</Button>
+                  </div>
+              </div>
+          </div>
+      );
+  };
+
   if (showNewRequest) return <RequestForm user={user} requestTypes={requestTypes} onSuccess={handleRequestSuccess} onCancel={() => setShowNewRequest(false)} />;
   
   if (isEditing && selectedRequest) {
@@ -208,6 +484,7 @@ export const EmployeeDashboard: React.FC<EmployeeDashboardProps> = ({ user, view
     return (
       <div className="space-y-6">
         <RequestDetailsModal />
+        <AppealModal />
         
         <div className="flex items-center justify-between">
             <div>
@@ -223,7 +500,10 @@ export const EmployeeDashboard: React.FC<EmployeeDashboardProps> = ({ user, view
 
         {requests.length === 0 ? <div className="text-center py-12 text-[var(--text-muted)] bg-[var(--bg-card)] rounded-xl border border-dashed border-[var(--border-color)]">{t('noRequests')}</div> : (
           <div className="space-y-4">
-            {requests.map((r) => (
+            {requests.map((r) => {
+              const appealMeta = getAppealMeta(r);
+              const isAppealed = !!appealMeta?.submitted_at;
+              return (
               <Card key={r.request_id} className="overflow-hidden hover:shadow-md transition-all duration-300 border border-[var(--border-color)] group cursor-pointer" onClick={() => setSelectedRequest(r)}>
                 <div className="p-4 sm:p-5">
                   {/* Top Section: Main Info + Status */}
@@ -267,6 +547,14 @@ export const EmployeeDashboard: React.FC<EmployeeDashboardProps> = ({ user, view
                     {/* Right Side: Status Badge + Date (Fixed Alignment) */}
                     <div className="flex flex-col items-end gap-2 shrink-0">
                        <Badge status={r.status} />
+                       {r.status === RequestStatus.REJECTED && (
+                          <button
+                              className={`text-[10px] font-bold px-2 py-1 rounded-full border transition-colors flex items-center gap-1 ${isAppealed ? 'text-emerald-600 border-emerald-200 bg-emerald-50 hover:bg-emerald-100' : 'text-rose-600 border-rose-200 bg-rose-50 hover:bg-rose-100'}`}
+                              onClick={(e) => { e.stopPropagation(); openAppealModal(r); }}
+                          >
+                              <AlertTriangle className="w-3 h-3" /> {isAppealed ? t('appealSubmitted') : t('appeal')}
+                          </button>
+                       )}
                        <span className="text-[10px] text-[var(--text-muted)] whitespace-nowrap mt-1" dir="ltr">
                           {new Date(r.created_at).toLocaleDateString('en-GB')}
                        </span>
@@ -281,7 +569,8 @@ export const EmployeeDashboard: React.FC<EmployeeDashboardProps> = ({ user, view
                   )}
                 </div>
               </Card>
-            ))}
+            );
+            })}
           </div>
         )}
       </div>

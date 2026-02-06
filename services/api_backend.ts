@@ -80,6 +80,13 @@ export const api_backend = {
       });
     },
 
+    submitAppeal: async (appeal: any) => {
+      return await fetch_wrapper('/employee/appeals', {
+        method: 'POST',
+        body: JSON.stringify(appeal)
+      });
+    },
+
     submitTransferRequest: async (req: any) => {
       return await fetch_wrapper('/employee/transfer-requests', {
         method: 'POST',

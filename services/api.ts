@@ -18,6 +18,7 @@ const DEFAULT_SETTINGS: SystemSettings = {
     setting_id: 1, 
     mode_type: ModeType.MANUAL, 
     n8n_webhook_url: '',
+    appeals_webhook_url: '',
     system_title: 'SCA Requests', 
     system_subtitle: 'Suez Canal Authority',
     system_logo_url: "https://upload.wikimedia.org/wikipedia/en/a/a2/Suez_Canal_Authority_logo.png",
@@ -92,6 +93,39 @@ const sendToN8nWebhook = async (payload: object): Promise<N8nWebhookResponse | n
         }
     } catch (e) {
         console.warn('N8N webhook failed:', e);
+        return null;
+    }
+};
+
+/**
+ * Sends appeal payload to the configured Appeals webhook.
+ * Intended for grievance/appeal workflow (separate from N8N rules webhook).
+ */
+const sendToAppealsWebhook = async (payload: object): Promise<N8nWebhookResponse | null> => {
+    const url = db_settings.appeals_webhook_url?.trim();
+    if (!url) return null;
+    try {
+        const res = await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-Source': 'SCA_Request_Management' },
+            body: JSON.stringify(payload),
+            signal: AbortSignal.timeout(30000)
+        });
+        const text = await res.text();
+        if (!text) return { success: res.ok };
+        try {
+            const data = JSON.parse(text);
+            return {
+                success: data.success ?? res.ok,
+                message: data.message,
+                workflow_run_id: data.workflow_run_id,
+                extra: data.extra
+            } as N8nWebhookResponse;
+        } catch {
+            return { success: res.ok, message: text.slice(0, 200) };
+        }
+    } catch (e) {
+        console.warn('Appeals webhook failed:', e);
         return null;
     }
 };
@@ -687,6 +721,67 @@ export const api = {
           }
 
           return newReq;
+      },
+
+      submitAppeal: async (appeal: { request: GenericRequest; reason: string; attachments?: { fileId: string; fileName: string; fileUrl: string; mimeType: string }[]; is_transfer?: boolean }) => {
+          if (shouldUseBackend()) return await api_backend.employee.submitAppeal(appeal);
+          await smartDelay(250);
+
+          const req = appeal.request;
+          const submittedAt = new Date().toISOString();
+          const attachments = (appeal.attachments || []).map((f, idx) => ({
+              file_name: f.fileName,
+              file_url: f.fileUrl,
+              mime_type: f.mimeType,
+              order: idx + 1
+          }));
+          const payload = {
+              meta: { timestamp: submittedAt, source_system: 'SCA_Request_Management', environment: isRemoteConnection() ? 'production' : 'mock', event_type: 'request_appeal' },
+              appeal: { reason: appeal.reason, submitted_at: submittedAt, attachments },
+              request: {
+                  request_id: req.request_id,
+                  transfer_id: (req as any).transfer_id || null,
+                  created_at: req.created_at,
+                  type_id: req.type_id ?? req.leave_type_id,
+                  type_name: req.leave_name || req.type_name,
+                  status: req.status,
+                  start_date: req.start_date,
+                  end_date: req.end_date,
+                  duration: req.duration,
+                  unit: req.unit,
+                  rejection_reason: req.rejection_reason || null,
+                  decision_by: req.decision_by || null,
+                  custom_data: req.custom_data || {}
+              },
+              employee: {
+                  id: req.user_id || (req as any).employee_id || null,
+                  full_name: req.employee_name || ''
+              },
+              is_transfer: !!appeal.is_transfer
+          };
+
+          const result = await sendToAppealsWebhook(payload);
+          if (!result) throw new Error('Appeals webhook not reachable.');
+
+          // Persist appeal info in mock data for UI
+          const idx = db_requests.findIndex(r => r.request_id === req.request_id);
+          if (idx !== -1) {
+              const existing = db_requests[idx];
+              db_requests[idx] = {
+                  ...existing,
+                  custom_data: {
+                      ...(existing.custom_data || {}),
+                      appeal: {
+                          status: 'SUBMITTED',
+                          submitted_at: submittedAt,
+                          reason: appeal.reason,
+                          attachments
+                      }
+                  }
+              };
+          }
+
+          return { success: true, response: result };
       },
 
       // NEW: Update request logic (supports both leave and transfer requests)

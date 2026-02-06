@@ -23,6 +23,24 @@ const getN8nConfig = async () => {
   }
 };
 
+const getAppealsConfig = async () => {
+  const envUrl =
+    process.env.APPEALS_WEBHOOK_URL ||
+    process.env.APPEAL_WEBHOOK_URL ||
+    process.env.N8N_APPEALS_WEBHOOK_URL ||
+    process.env.N8N_APPEAL_WEBHOOK_URL ||
+    '';
+  try {
+    const rows = await query('SELECT settings_json FROM sca.system_settings WHERE setting_id = 1');
+    const settings = parseSettingsJson(rows?.[0]?.settings_json);
+    return {
+      url: (settings?.appeals_webhook_url || envUrl || '').trim()
+    };
+  } catch {
+    return { url: envUrl };
+  }
+};
+
 const sendToN8nWebhook = async (url, payload) => {
   if (!url) return null;
   try {
@@ -36,6 +54,23 @@ const sendToN8nWebhook = async (url, payload) => {
     try { return JSON.parse(text); } catch { return { success: resp.ok, message: text.slice(0, 200) }; }
   } catch (e) {
     console.warn('N8N webhook failed', e);
+    return null;
+  }
+};
+
+const sendToAppealsWebhook = async (url, payload) => {
+  if (!url) return null;
+  try {
+    const resp = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Source': 'SCA_Request_Management' },
+      body: JSON.stringify(payload)
+    });
+    const text = await resp.text();
+    if (!text) return { success: resp.ok };
+    try { return JSON.parse(text); } catch { return { success: resp.ok, message: text.slice(0, 200) }; }
+  } catch (e) {
+    console.warn('Appeals webhook failed', e);
     return null;
   }
 };
@@ -176,6 +211,108 @@ router.post('/submit-request', async (req, res) => {
     }
 
     res.json({ request_id: reqId, status: finalStatus, rejection_reason: rejectionReason });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// POST /api/employee/appeals
+router.post('/appeals', async (req, res) => {
+  try {
+    const body = req.body || {};
+    const appeal = body.appeal || {};
+    const requestSnapshot = body.request || {};
+    const employee = body.employee || {};
+
+    const requestId = Number(requestSnapshot.request_id || body.request_id || 0);
+    const userId = Number(employee.id || body.user_id || 0);
+    const reason = String(appeal.reason || body.reason || '').trim();
+    const isTransfer = !!(body.is_transfer || requestSnapshot.transfer_id);
+
+    if (!requestId || !userId || !reason) {
+      return res.status(400).json({ success: false, message: 'Missing request_id, user_id, or appeal reason.' });
+    }
+
+    const { url } = await getAppealsConfig();
+    if (!url) return res.status(400).json({ success: false, message: 'Appeals webhook URL not configured.' });
+
+    const submittedAt = appeal.submitted_at || new Date().toISOString();
+    const attachments = Array.isArray(appeal.attachments) ? appeal.attachments : [];
+
+    // Enrich employee info from DB if available
+    let employeeInfo = employee;
+    try {
+      const userRows = await query(
+        'SELECT full_name, email, phone_number, job_id, grade_id, org_unit_id FROM sca.users WHERE user_id = @UserId',
+        { UserId: userId }
+      );
+      const userInfo = userRows?.[0] || {};
+      employeeInfo = {
+        id: userId,
+        full_name: employee.full_name || userInfo.full_name || requestSnapshot.employee_name || '',
+        email: employee.email || userInfo.email || null,
+        phone: employee.phone || userInfo.phone_number || null,
+        org_unit_id: employee.org_unit_id || userInfo.org_unit_id || null
+      };
+    } catch {
+      employeeInfo = {
+        id: userId,
+        full_name: employee.full_name || requestSnapshot.employee_name || '',
+        email: employee.email || null,
+        phone: employee.phone || null,
+        org_unit_id: employee.org_unit_id || null
+      };
+    }
+
+    const payload = {
+      meta: body.meta || { timestamp: submittedAt, source_system: 'SCA_Request_Management', event_type: 'request_appeal' },
+      appeal: { reason, submitted_at: submittedAt, attachments },
+      request: {
+        request_id: requestSnapshot.request_id || requestId,
+        transfer_id: requestSnapshot.transfer_id || null,
+        created_at: requestSnapshot.created_at || null,
+        type_id: requestSnapshot.type_id || requestSnapshot.leave_type_id || null,
+        type_name: requestSnapshot.type_name || requestSnapshot.leave_name || null,
+        status: requestSnapshot.status || null,
+        start_date: requestSnapshot.start_date || null,
+        end_date: requestSnapshot.end_date || null,
+        duration: requestSnapshot.duration || null,
+        unit: requestSnapshot.unit || null,
+        rejection_reason: requestSnapshot.rejection_reason || null,
+        decision_by: requestSnapshot.decision_by || null,
+        custom_data: requestSnapshot.custom_data || {}
+      },
+      employee: employeeInfo,
+      is_transfer: isTransfer
+    };
+
+    const result = await sendToAppealsWebhook(url, payload);
+
+    // Persist appeal meta into request custom data (best-effort)
+    try {
+      const table = isTransfer ? 'sca.transfer_requests' : 'sca.requests';
+      const column = isTransfer ? 'custom_dynamic_fields' : 'custom_data';
+      const idColumn = isTransfer ? 'transfer_id' : 'request_id';
+      const rows = await query(`SELECT ${column} FROM ${table} WHERE ${idColumn} = @Id`, { Id: requestId });
+      if (rows && rows.length > 0) {
+        const existing = parseSettingsJson(rows[0][column]) || {};
+        const updated = {
+          ...existing,
+          appeal: {
+            status: 'SUBMITTED',
+            submitted_at: submittedAt,
+            reason,
+            attachments
+          }
+        };
+        await query(`UPDATE ${table} SET ${column} = @CustomData WHERE ${idColumn} = @Id`, {
+          CustomData: JSON.stringify(updated),
+          Id: requestId
+        });
+      }
+    } catch (err) {
+      console.warn('Appeal persistence failed', err);
+    }
+
+    res.json({ success: true, response: result });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 

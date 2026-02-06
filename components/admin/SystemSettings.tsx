@@ -403,6 +403,14 @@ export const SystemSettingsPanel: React.FC<Props> = ({ onSettingsChange }) => {
                                 </Button>
                             </div>
                         </div>
+                        <div className="transition-all duration-300">
+                            <label className="block text-sm font-bold mb-2 text-[var(--text-main)] flex justify-between items-center">{t('appealWebhookUrl')} <span className="text-[10px] text-amber-600 bg-amber-100 px-2 py-0.5 rounded-full">{t('appealTag')}</span></label>
+                            <div className="flex items-center shadow-sm rounded-lg overflow-hidden border border-[var(--border-color)] focus-within:ring-2 focus-within:ring-[var(--primary)]">
+                                <div className="bg-[var(--bg-body)] border-l border-[var(--border-color)] px-4 py-3 text-[var(--text-muted)] text-xs font-mono font-bold">POST</div>
+                                <input value={settings.appeals_webhook_url || ''} onChange={(e) => setSettings({...settings, appeals_webhook_url: e.target.value})} placeholder="https://your-appeals-webhook.com/..." className="flex-1 bg-[var(--bg-card)] text-[var(--text-main)] p-3 text-sm font-mono focus:outline-none dir-ltr" />
+                            </div>
+                            <p className="text-xs text-[var(--text-muted)] mt-2 flex items-start gap-1"><Info className="w-3 h-3 mt-0.5 shrink-0" /> {t('appealWebhookHint')}</p>
+                        </div>
                     </CardContent>
                 </Card>
 

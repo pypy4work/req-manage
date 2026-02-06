@@ -17,6 +17,7 @@ const DEFAULT_SETTINGS = {
   setting_id: 1,
   mode_type: 'Manual',
   n8n_webhook_url: '',
+  appeals_webhook_url: '',
   system_title: 'SCA Requests',
   system_subtitle: 'Suez Canal Authority',
   system_logo_url: '',
