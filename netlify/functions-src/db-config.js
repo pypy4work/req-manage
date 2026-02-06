@@ -1,5 +1,5 @@
 const DEFAULT_PORTS = {
-  postgres: 5432,
+  postgres: 6543,
   mssql: 1433
 };
 

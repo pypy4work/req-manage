@@ -5,6 +5,7 @@ import { useNotification } from '../../components/ui/NotificationSystem';
 import { Database, Table, RefreshCw, Save, Trash2, Edit2, X, Columns, Search, Settings, Hash, Type, Calendar, CheckSquare, AlertTriangle, DatabaseZap, PlusCircle, LayoutGrid, Plus, Server, Lock, Wifi, Info, HelpCircle, Key, Fingerprint, Shield, AlignLeft, Link as LinkIcon, ArrowRightCircle } from 'lucide-react';
 import { useLanguage } from '../../contexts/LanguageContext';
 import { DatabaseConfig } from '../../types';
+import { USE_BACKEND } from '../../utils/config';
 
 export const DatabaseManager: React.FC = () => {
     const [tables, setTables] = useState<string[]>([]);
@@ -65,7 +66,13 @@ export const DatabaseManager: React.FC = () => {
 
     useEffect(() => {
         loadTables();
-        api.admin.getSettings().then(s => setIsConnected(s.db_config.is_connected || false));
+        if (USE_BACKEND) {
+            api.admin.testDatabaseConnection()
+                .then((ok) => setIsConnected(!!ok))
+                .catch(() => setIsConnected(false));
+        } else {
+            api.admin.getSettings().then(s => setIsConnected(s.db_config.is_connected || false));
+        }
     }, []);
 
     useEffect(() => {
@@ -136,37 +143,24 @@ export const DatabaseManager: React.FC = () => {
     };
 
     const handleConnectSQL = async () => {
-        if(!sqlConfig.host || !sqlConfig.username) {
-            notify({ type: 'warning', title: 'Missing Data', message: 'Please enter Host and Username' });
+        if (!USE_BACKEND) {
+            notify({ type: 'warning', title: 'Backend Required', message: 'Database connections must be configured on the backend. Set VITE_BACKEND_URL and server env vars.' });
             return;
         }
 
         setIsConnecting(true);
         try {
-            const success = await api.admin.testDatabaseConnection(sqlConfig);
+            const success = await api.admin.testDatabaseConnection();
             if (success) {
-                await api.admin.updateSettings({ 
-                    setting_id: 1, 
-                    mode_type: 'MANUAL' as any, 
-                    n8n_webhook_url: '', 
-                    system_title: 'SCA System', 
-                    system_subtitle: '', 
-                    system_logo_url: '', 
-                    logo_source: 'url', 
-                    sidebar_pattern_style: 'stars', 
-                    updated_at: '', 
-                    db_config: { ...sqlConfig, is_connected: true } 
-                } as any);
-                
                 setIsConnected(true);
-                notify({ type: 'success', title: 'Connected', message: 'Successfully linked to Production Database.' });
+                notify({ type: 'success', title: 'Connected', message: 'Backend database connection verified.' });
                 fetchData();
                 setIsSqlModalOpen(false);
             } else {
                 throw new Error("Connection timed out");
             }
         } catch (e) {
-            notify({ type: 'error', title: 'Connection Failed', message: 'Could not reach SQL Server. Check VPN/Firewall.' });
+            notify({ type: 'error', title: 'Connection Failed', message: 'Backend database connection failed. Check server env vars.' });
         } finally {
             setIsConnecting(false);
         }
@@ -704,6 +698,29 @@ export const DatabaseManager: React.FC = () => {
                                     </p>
                                 </div>
                             </div>
+                            {USE_BACKEND && (
+                                <div className="bg-amber-900/20 border border-amber-800 p-4 rounded-lg flex gap-3">
+                                    <div className="p-2 bg-amber-900/50 rounded h-fit shrink-0"><AlertTriangle className="w-5 h-5 text-amber-400"/></div>
+                                    <div>
+                                        <h4 className="text-sm font-bold text-amber-300 mb-1">Backend-managed connection</h4>
+                                        <p className="text-xs text-amber-200/70 leading-relaxed">
+                                            Database credentials are managed by backend environment variables. The fields below are informational only.
+                                            Use the Test Connection button to verify server connectivity.
+                                        </p>
+                                    </div>
+                                </div>
+                            )}
+                            {!USE_BACKEND && (
+                                <div className="bg-rose-900/20 border border-rose-800 p-4 rounded-lg flex gap-3">
+                                    <div className="p-2 bg-rose-900/50 rounded h-fit shrink-0"><AlertTriangle className="w-5 h-5 text-rose-400"/></div>
+                                    <div>
+                                        <h4 className="text-sm font-bold text-rose-300 mb-1">Backend not configured</h4>
+                                        <p className="text-xs text-rose-200/70 leading-relaxed">
+                                            Direct database connections from the browser are disabled. Configure a backend and set VITE_BACKEND_URL.
+                                        </p>
+                                    </div>
+                                </div>
+                            )}
 
                             {!isConnected ? (
                                 <div className="space-y-4 animate-in fade-in">
@@ -712,31 +729,31 @@ export const DatabaseManager: React.FC = () => {
                                             <label className={`text-xs font-bold mb-1.5 block ${DARK_TEXT_MUTED}`}>Server Host IP</label>
                                             <div className="relative">
                                                 <Server className="w-4 h-4 absolute top-2.5 left-3 text-slate-500"/>
-                                                <Input className={`pl-9 ${DARK_INPUT_BG} ${DARK_BORDER} text-white`} placeholder="192.168.1.X" value={sqlConfig.host} onChange={e => setSqlConfig({...sqlConfig, host: e.target.value})} />
+                                                <Input className={`pl-9 ${DARK_INPUT_BG} ${DARK_BORDER} text-white`} placeholder="192.168.1.X" value={sqlConfig.host} onChange={e => setSqlConfig({...sqlConfig, host: e.target.value})} disabled={USE_BACKEND} />
                                             </div>
                                         </div>
                                         <div>
                                             <label className={`text-xs font-bold mb-1.5 block ${DARK_TEXT_MUTED}`}>Database Name</label>
-                                            <Input className={`${DARK_INPUT_BG} ${DARK_BORDER} text-white`} placeholder="SCA_Leaves_DB" value={sqlConfig.database_name} onChange={e => setSqlConfig({...sqlConfig, database_name: e.target.value})} />
+                                            <Input className={`${DARK_INPUT_BG} ${DARK_BORDER} text-white`} placeholder="SCA_Leaves_DB" value={sqlConfig.database_name} onChange={e => setSqlConfig({...sqlConfig, database_name: e.target.value})} disabled={USE_BACKEND} />
                                         </div>
                                     </div>
                                     
                                     <div className="grid grid-cols-2 gap-4">
                                         <div>
                                             <label className={`text-xs font-bold mb-1.5 block ${DARK_TEXT_MUTED}`}>Username</label>
-                                            <Input className={`${DARK_INPUT_BG} ${DARK_BORDER} text-white`} placeholder="sa_admin" value={sqlConfig.username} onChange={e => setSqlConfig({...sqlConfig, username: e.target.value})} />
+                                            <Input className={`${DARK_INPUT_BG} ${DARK_BORDER} text-white`} placeholder="sa_admin" value={sqlConfig.username} onChange={e => setSqlConfig({...sqlConfig, username: e.target.value})} disabled={USE_BACKEND} />
                                         </div>
                                         <div>
                                             <label className={`text-xs font-bold mb-1.5 block ${DARK_TEXT_MUTED}`}>Password</label>
                                             <div className="relative">
                                                 <Lock className="w-4 h-4 absolute top-2.5 left-3 text-slate-500"/>
-                                                <Input type="password" className={`pl-9 ${DARK_INPUT_BG} ${DARK_BORDER} text-white`} placeholder="••••••••" value={sqlConfig.password} onChange={e => setSqlConfig({...sqlConfig, password: e.target.value})} />
+                                                <Input type="password" className={`pl-9 ${DARK_INPUT_BG} ${DARK_BORDER} text-white`} placeholder="••••••••" value={sqlConfig.password} onChange={e => setSqlConfig({...sqlConfig, password: e.target.value})} disabled={USE_BACKEND} />
                                             </div>
                                         </div>
                                     </div>
 
                                     <div className="flex items-center gap-2">
-                                        <input type="checkbox" id="ssl" checked={sqlConfig.encrypt} onChange={e => setSqlConfig({...sqlConfig, encrypt: e.target.checked})} className="rounded bg-slate-800 border-slate-600 text-indigo-600"/>
+                                        <input type="checkbox" id="ssl" checked={sqlConfig.encrypt} onChange={e => setSqlConfig({...sqlConfig, encrypt: e.target.checked})} className="rounded bg-slate-800 border-slate-600 text-indigo-600" disabled={USE_BACKEND}/>
                                         <label htmlFor="ssl" className="text-xs text-slate-400 cursor-pointer">Enable SSL Encryption</label>
                                     </div>
 

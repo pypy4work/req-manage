@@ -244,10 +244,11 @@ export const api_backend = {
     },
 
     testDatabaseConnection: async (config?: any) => {
-      return await fetch_wrapper('/admin/test-db', {
+      const data = await fetch_wrapper('/admin/test-db', {
         method: 'POST',
         body: JSON.stringify(config || {})
       });
+      return !!data?.success;
     },
 
     testN8nWebhook: async () => {

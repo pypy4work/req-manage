@@ -10,6 +10,7 @@ import { AuthDiagnostics } from './AuthDiagnostics';
 import { DataQualityMonitor } from './DataQualityMonitor';
 import { ProfileViewConfig } from './ProfileViewConfig';
 import { CosmicBackground } from '../ui/CosmicBackground';
+import { USE_BACKEND } from '../../utils/config';
 
 interface Props {
     onSettingsChange?: (settings: SystemSettings) => void;
@@ -22,6 +23,7 @@ export const SystemSettingsPanel: React.FC<Props> = ({ onSettingsChange }) => {
   const [isTestingWebhook, setIsTestingWebhook] = useState(false);
   const { notify } = useNotification();
   const { t } = useLanguage();
+  const isBackendManaged = USE_BACKEND;
 
   useEffect(() => {
     api.admin.getSettings().then(setSettings);
@@ -164,22 +166,30 @@ export const SystemSettingsPanel: React.FC<Props> = ({ onSettingsChange }) => {
                 )}
             </CardHeader>
             <CardContent className="space-y-6 pt-6">
+                {isBackendManaged && (
+                    <div className="bg-amber-50/80 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 p-4 rounded-xl text-xs text-amber-700 dark:text-amber-300">
+                        Backend-managed connection: Database credentials are configured via server environment variables. Changes here do not affect the live connection.
+                    </div>
+                )}
                 <div className="flex p-1 bg-[var(--bg-body)] rounded-lg border border-[var(--border-color)] w-full md:w-fit">
                     <button 
                         onClick={() => setSettings({...settings, db_config: {...settings.db_config, connection_type: 'local_mock'}})} 
-                        className={`flex-1 md:flex-none px-6 py-2 rounded-md text-sm font-bold transition-all flex items-center gap-2 ${settings.db_config.connection_type === 'local_mock' ? 'bg-[var(--bg-card)] text-[var(--primary)] shadow-sm' : 'text-[var(--text-muted)] hover:text-[var(--text-main)]'}`}
+                        disabled={isBackendManaged}
+                        className={`flex-1 md:flex-none px-6 py-2 rounded-md text-sm font-bold transition-all flex items-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed ${settings.db_config.connection_type === 'local_mock' ? 'bg-[var(--bg-card)] text-[var(--primary)] shadow-sm' : 'text-[var(--text-muted)] hover:text-[var(--text-main)]'}`}
                     >
                         <HardDrive className="w-4 h-4" /> {t('localMock')}
                     </button>
                     <button 
                         onClick={() => setSettings({...settings, db_config: {...settings.db_config, connection_type: 'sql_server'}})} 
-                        className={`flex-1 md:flex-none px-6 py-2 rounded-md text-sm font-bold transition-all flex items-center gap-2 ${settings.db_config.connection_type === 'sql_server' ? 'bg-[var(--bg-card)] text-[var(--primary)] shadow-sm' : 'text-[var(--text-muted)] hover:text-[var(--text-main)]'}`}
+                        disabled={isBackendManaged}
+                        className={`flex-1 md:flex-none px-6 py-2 rounded-md text-sm font-bold transition-all flex items-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed ${settings.db_config.connection_type === 'sql_server' ? 'bg-[var(--bg-card)] text-[var(--primary)] shadow-sm' : 'text-[var(--text-muted)] hover:text-[var(--text-main)]'}`}
                     >
                         <Wifi className="w-4 h-4" /> {t('sqlServer')}
                     </button>
                     <button 
                         onClick={() => setSettings({...settings, db_config: {...settings.db_config, connection_type: 'postgres'}})} 
-                        className={`flex-1 md:flex-none px-6 py-2 rounded-md text-sm font-bold transition-all flex items-center gap-2 ${settings.db_config.connection_type === 'postgres' ? 'bg-[var(--bg-card)] text-[var(--primary)] shadow-sm' : 'text-[var(--text-muted)] hover:text-[var(--text-main)]'}`}
+                        disabled={isBackendManaged}
+                        className={`flex-1 md:flex-none px-6 py-2 rounded-md text-sm font-bold transition-all flex items-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed ${settings.db_config.connection_type === 'postgres' ? 'bg-[var(--bg-card)] text-[var(--primary)] shadow-sm' : 'text-[var(--text-muted)] hover:text-[var(--text-main)]'}`}
                     >
                         <Database className="w-4 h-4" /> {t('postgres')}
                     </button>
@@ -188,22 +198,22 @@ export const SystemSettingsPanel: React.FC<Props> = ({ onSettingsChange }) => {
                 {settings.db_config.connection_type !== 'local_mock' ? (
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6 animate-in fade-in">
                         <div className="space-y-4">
-                            <div><label className="text-sm font-bold mb-1 block text-[var(--text-main)]">{t('dbHost')}</label><Input placeholder="192.168.1.100 or localhost" value={settings.db_config.host || ''} onChange={(e) => setSettings({...settings, db_config: {...settings.db_config, host: e.target.value}})} className="dir-ltr" /></div>
-                            <div><label className="text-sm font-bold mb-1 block text-[var(--text-main)]">{t('dbName')}</label><Input placeholder="SCA_LeaveManagement" value={settings.db_config.database_name || ''} onChange={(e) => setSettings({...settings, db_config: {...settings.db_config, database_name: e.target.value}})} className="dir-ltr" /></div>
+                            <div><label className="text-sm font-bold mb-1 block text-[var(--text-main)]">{t('dbHost')}</label><Input placeholder="192.168.1.100 or localhost" value={settings.db_config.host || ''} onChange={(e) => setSettings({...settings, db_config: {...settings.db_config, host: e.target.value}})} className="dir-ltr" disabled={isBackendManaged} /></div>
+                            <div><label className="text-sm font-bold mb-1 block text-[var(--text-main)]">{t('dbName')}</label><Input placeholder="SCA_LeaveManagement" value={settings.db_config.database_name || ''} onChange={(e) => setSettings({...settings, db_config: {...settings.db_config, database_name: e.target.value}})} className="dir-ltr" disabled={isBackendManaged} /></div>
                             <div className="flex items-center gap-2 pt-4">
                                 <label className="relative inline-flex items-center cursor-pointer">
-                                    <input type="checkbox" checked={settings.db_config.encrypt || false} onChange={(e) => setSettings({...settings, db_config: {...settings.db_config, encrypt: e.target.checked}})} className="sr-only peer" />
+                                    <input type="checkbox" checked={settings.db_config.encrypt || false} onChange={(e) => setSettings({...settings, db_config: {...settings.db_config, encrypt: e.target.checked}})} className="sr-only peer" disabled={isBackendManaged} />
                                     <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-[var(--primary)]"></div>
                                 </label>
                                 <span className="text-sm font-medium text-[var(--text-main)]">{t('dbEncrypt')}</span>
                             </div>
                         </div>
                         <div className="space-y-4">
-                             <div><label className="text-sm font-bold mb-1 block text-[var(--text-main)]">{t('dbUser')}</label><Input placeholder="sa" value={settings.db_config.username || ''} onChange={(e) => setSettings({...settings, db_config: {...settings.db_config, username: e.target.value}})} className="dir-ltr" /></div>
+                             <div><label className="text-sm font-bold mb-1 block text-[var(--text-main)]">{t('dbUser')}</label><Input placeholder="sa" value={settings.db_config.username || ''} onChange={(e) => setSettings({...settings, db_config: {...settings.db_config, username: e.target.value}})} className="dir-ltr" disabled={isBackendManaged} /></div>
                              <div>
                                  <label className="text-sm font-bold mb-1 block text-[var(--text-main)]">{t('dbPassword')}</label>
                                  <div className="relative">
-                                     <Input type="password" placeholder="••••••••" value={settings.db_config.password || ''} onChange={(e) => setSettings({...settings, db_config: {...settings.db_config, password: e.target.value}})} className="dir-ltr pl-10" />
+                                     <Input type="password" placeholder="••••••••" value={settings.db_config.password || ''} onChange={(e) => setSettings({...settings, db_config: {...settings.db_config, password: e.target.value}})} className="dir-ltr pl-10" disabled={isBackendManaged} />
                                      <Lock className="w-4 h-4 absolute top-3.5 left-3 text-[var(--text-muted)]" />
                                  </div>
                              </div>

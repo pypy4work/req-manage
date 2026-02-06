@@ -22,7 +22,14 @@ const state = {
 let initPromise = null;
 
 function isProduction() {
-  return process.env.NODE_ENV === 'production' || process.env.CONTEXT === 'production';
+  const nodeProd = process.env.NODE_ENV === 'production';
+  const contextProd = process.env.CONTEXT === 'production';
+  const netlifyProd =
+    !!process.env.NETLIFY &&
+    process.env.CONTEXT !== 'dev' &&
+    process.env.NETLIFY_DEV !== 'true' &&
+    process.env.NETLIFY_LOCAL !== 'true';
+  return nodeProd || contextProd || netlifyProd;
 }
 
 async function safePing(adapter, label) {
@@ -59,7 +66,8 @@ async function initDbRouter(force = false) {
 
     const prod = isProduction();
     const allowFallback = routerConfig.allowFallback || !prod;
-    const allowMock = routerConfig.allowMock || !prod;
+    const forceNoMock = prod && process.env.DB_ROUTER_ALLOW_MOCK_IN_PROD !== 'true';
+    const allowMock = (routerConfig.allowMock || !prod) && !forceNoMock;
     const allowForce = routerConfig.allowForce && (!prod || process.env.DB_ROUTER_ALLOW_FORCE_IN_PROD === 'true');
 
     let active = null;
@@ -92,6 +100,10 @@ async function initDbRouter(force = false) {
         message: 'Supabase connectivity test failed during startup.',
         details: supabaseHealth
       });
+    }
+
+    if (!active) {
+      state.degradedReason = state.degradedReason || 'No database adapter available.';
     }
 
     if (state.misconfiguration) {

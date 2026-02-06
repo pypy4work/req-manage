@@ -1010,8 +1010,10 @@ export const api = {
       },
       testDatabaseConnection: async (config?: DatabaseConfig) => { 
           if (shouldUseBackend()) return await api_backend.admin.testDatabaseConnection(config);
-          await smartDelay(1000); 
-          return true; 
+          await smartDelay(600);
+          // In mock/frontend-only mode, only local_mock is considered "connected"
+          if (db_settings?.db_config?.connection_type === 'local_mock') return true;
+          throw new Error('Backend not configured. Database connection can only be tested via backend.');
       },
       testN8nWebhook: async () => {
           if (shouldUseBackend() && api_backend.admin.testN8nWebhook) return await api_backend.admin.testN8nWebhook();

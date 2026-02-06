@@ -127,9 +127,33 @@ router.put('/settings', requirePermission('admin:settings'), async (req, res) =>
 // POST /api/admin/test-db
 router.post('/test-db', requirePermission('admin:database'), async (req, res) => {
   try {
-    await query('SELECT 1');
-    res.json({ success: true });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+    const { initDbRouter, getRouterState } = require('../db-router');
+    await initDbRouter();
+    const state = getRouterState();
+
+    const active = state.active || 'none';
+    const supabaseOk = !!state.supabaseHealth?.ok;
+    const mssqlOk = !!state.mssqlHealth?.ok;
+
+    if (active === 'supabase' && supabaseOk) {
+      return res.json({ success: true, active_database: 'supabase', latency_ms: state.supabaseHealth?.latencyMs || null });
+    }
+
+    if (active === 'mssql' && mssqlOk) {
+      return res.json({ success: true, active_database: 'mssql', latency_ms: state.mssqlHealth?.latencyMs || null });
+    }
+
+    const message = state.degradedReason || 'Database not connected.';
+    return res.status(503).json({
+      success: false,
+      message,
+      active_database: active,
+      supabase: state.supabaseHealth || null,
+      mssql: state.mssqlHealth || null
+    });
+  } catch (e) {
+    res.status(500).json({ success: false, message: e.message || 'DB test failed.' });
+  }
 });
 
 // POST /api/admin/n8n-test
