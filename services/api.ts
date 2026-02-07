@@ -1208,21 +1208,37 @@ export const api = {
 
           return true;
       },
-      addColumnToTable: async (table: string, col: string, def: any) => true,
-      dropColumnFromTable: async (table: string, col: string) => true,
+      addColumnToTable: async (table: string, col: string, def: any) => {
+          if (shouldUseBackend()) return await api_backend.admin.addColumnToTable(table, col, def);
+          return true;
+      },
+      dropColumnFromTable: async (table: string, col: string) => {
+          if (shouldUseBackend()) return await api_backend.admin.dropColumnFromTable(table, col);
+          return true;
+      },
       createTable: async (tableName: string) => {
+          if (shouldUseBackend()) return await api_backend.admin.createTable(tableName);
           if(!db_custom_tables[tableName]) {
               db_custom_tables[tableName] = [];
           }
           return true;
       },
       addTableRow: async (table: string, data: any) => {
+          if (shouldUseBackend()) return await api_backend.admin.addTableRow(table, data);
           await smartDelay();
           if (db_custom_tables[table]) {
               db_custom_tables[table].push(data);
               return true;
           }
           return false;
+      },
+      updateTableRow: async (table: string, pk: string, id: any, data: any) => {
+          if (shouldUseBackend()) return await api_backend.admin.updateTableRow(table, pk, id, data);
+          return true;
+      },
+      deleteTableRow: async (table: string, pk: string, id: any) => {
+          if (shouldUseBackend()) return await api_backend.admin.deleteTableRow(table, pk, id);
+          return true;
       },
       getOrgUnits: async (forTransfer?: boolean) => {
           let units: OrganizationalUnit[];

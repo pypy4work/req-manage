@@ -46,6 +46,18 @@ def main():
         eg_txt = zf.read("EG.txt").decode("utf-8")
 
     # Parse admin1 codes (governorates)
+    gov_ar = {
+        'Cairo': 'القاهرة', 'Alexandria': 'الإسكندرية', 'Port Said': 'بورسعيد',
+        'Suez': 'السويس', 'Damietta': 'دمياط', 'Dakahlia': 'الدقهلية',
+        'Sharqia': 'الشرقية', 'Qalyubia': 'القليوبية', 'Kafr el-Sheikh': 'كفر الشيخ',
+        'Gharbia': 'الغربية', 'Monufia': 'المنوفية', 'Beheira': 'البحيرة',
+        'Ismailia': 'الإسماعيلية', 'Giza': 'الجيزة', 'Beni Suweif': 'بني سويف',
+        'Faiyum': 'الفيوم', 'Minya': 'المنيا', 'Asyut': 'أسيوط',
+        'Sohag': 'سوهاج', 'Qena': 'قنا', 'Aswan': 'أسوان', 'Luxor': 'الأقصر',
+        'Red Sea': 'البحر الأحمر', 'New Valley': 'الوادي الجديد',
+        'Matruh': 'مطروح', 'North Sinai': 'شمال سيناء', 'South Sinai': 'جنوب سيناء'
+    }
+
     admin1 = {}
     for line in admin1_txt.splitlines():
         parts = line.split("\t")
@@ -55,14 +67,38 @@ def main():
         if not code.startswith("EG."):
             continue
         admin1_code = code.split(".")[1]
+        en_name = asciiname or name
         admin1[admin1_code] = {
             "code": admin1_code,
-            "name_en": asciiname or name,
-            "name_ar": asciiname or name,
+            "name_en": en_name,
+            "name_ar": gov_ar.get(en_name, en_name),
             "geoname_id": to_int(geoname_id)
         }
 
     # Parse admin2 codes (centers)
+    cities_ar = {
+        'Heliopolis': 'مصر الجديدة', 'Nasr City': 'مدينة نصر', 'Maadi': 'المعادي',
+        'Helwan': 'حلوان', 'Giza': 'الجيزة', 'Dokki': 'الدقي',
+        '6th of October': '6 أكتوبر', 'Sheikh Zayed': 'الشيخ زايد',
+        'Borg El Arab': 'برج العرب', 'Suez': 'السويس', 'Ismailia': 'الإسماعيلية',
+        'Port Said': 'بورسعيد', 'Arish': 'العريش', 'Sharm El Sheikh': 'شرم الشيخ',
+        'Mit Ghamr': 'ميت غمر', 'Dikirnis': 'دكرنس', 'Bilqas': 'بلقاس',
+        'Manzilah': 'المنزلة', 'Mansurah': 'المنصورة', 'Aja': 'أجا',
+        'Damanhur': 'دمنهور', 'Kafr ad Dawwar': 'كفر الدوار', 'Rashid': 'رشيد',
+        'Edku': 'إدكو', 'Tanta': 'طنطا', 'Zifta': 'زفتى', 'Mahallah al Kubra': 'المحلة الكبرى',
+        'Kafr el-Sheikh': 'كفر الشيخ', 'Minya': 'المنيا', 'Asyut': 'أسيوط',
+        'Sohag': 'سوهاج', 'Qena': 'قنا', 'Aswan': 'أسوان', 'Luxor': 'الأقصر'
+    }
+
+    def get_ar_name(en_name: str) -> str:
+        # Strip common prefixes for better matching
+        clean_name = re.sub(r'^(Markaz|Qism|Center of)\s+', '', en_name, flags=re.IGNORECASE).strip()
+        # Common variations in GeoNames
+        clean_name = clean_name.replace('`', '').replace("'", "")
+        if clean_name in cities_ar:
+            return cities_ar[clean_name]
+        return en_name
+
     admin2 = {}
     for line in admin2_txt.splitlines():
         parts = line.split("\t")
@@ -73,12 +109,13 @@ def main():
             continue
         _, a1, a2 = code.split(".", 2)
         admin2_code = f"{a1}.{a2}"
+        en_name = asciiname or name
         admin2[admin2_code] = {
             "admin1": a1,
             "admin2": a2,
             "code": admin2_code,
-            "name_en": asciiname or name,
-            "name_ar": asciiname or name,
+            "name_en": en_name,
+            "name_ar": get_ar_name(en_name),
             "geoname_id": to_int(geoname_id)
         }
 

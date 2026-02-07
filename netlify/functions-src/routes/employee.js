@@ -109,6 +109,157 @@ const sendToAppealsWebhook = async (url, payload) => {
   }
 };
 
+const getEnrichedPayload = async ({ userId, typeId, requestId, isTransfer, extraData = {} }) => {
+  try {
+    // 1. Fetch User and Manager details
+    const userRows = await query(`
+      SELECT u.full_name, u.email, u.phone_number, u.employee_number, 
+             u.job_id, u.grade_id, u.org_unit_id,
+             ou.unit_name, ou.manager_id as unit_manager_id,
+             g.grade_code, g.grade_name,
+             m.full_name as manager_name, m.email as manager_email, m.phone_number as manager_phone
+      FROM sca.users u
+      LEFT JOIN sca.organizational_units ou ON u.org_unit_id = ou.unit_id
+      LEFT JOIN sca.job_grades g ON u.grade_id = g.grade_id
+      LEFT JOIN sca.users m ON ou.manager_id = m.user_id
+      WHERE u.user_id = @UserId`, { UserId: userId });
+    
+    const userInfo = userRows?.[0] || {};
+
+    // Use unit_manager_id as the primary manager reference for now
+    const managerId = userInfo.unit_manager_id;
+
+    // 2. Fetch Request Type and Rules
+    const typeRows = await query(`
+      SELECT rt.id, rt.name, rt.unit AS balance_unit, rt.fields AS fields_config_json
+      FROM sca.request_types rt
+      WHERE rt.id = @TypeId`, { TypeId: typeId });
+    const typeInfo = typeRows?.[0] || {};
+
+    // Fetch Rules linked to this type
+    let rulesRows = [];
+    try {
+      rulesRows = await query(`
+        SELECT vr.rule_name, vr.left_field_id, vr.operator, vr.right_source, vr.right_value, vr.suggested_action, vr.error_message_ar
+        FROM sca.request_type_rules_link l
+        JOIN sca.validation_rules vr ON l.rule_id = vr.rule_id
+        WHERE l.request_type_id = @TypeId`, { TypeId: typeId });
+    } catch (err) {
+      console.warn('Rules fetch failed, continuing without rules');
+    }
+
+    // 3. Fetch Balances
+    let balance = null;
+    try {
+      const balanceRows = await query(`
+        SELECT remaining_balance AS remaining
+        FROM sca.allowance_balances 
+        WHERE user_id = @UserId AND request_type_id = @TypeId`, { UserId: userId, TypeId: typeId });
+      balance = balanceRows?.[0] || null;
+    } catch (err) {
+      try {
+        const altBalanceRows = await query(`
+          SELECT remaining, total_entitlement as total
+          FROM sca.leave_balances 
+          WHERE user_id = @UserId AND request_type_id = @TypeId`, { UserId: userId, TypeId: typeId });
+        balance = altBalanceRows?.[0] || null;
+      } catch (e2) {
+        console.warn('Balances fetch failed');
+      }
+    }
+
+    // 4. Fetch Attachments
+    let attachmentRows = [];
+    try {
+      attachmentRows = await query(`
+        SELECT file_url, uploaded_at 
+        FROM sca.request_attachments 
+        WHERE request_id = @Id`, { Id: requestId });
+    } catch (err) {
+      console.warn('Attachments fetch failed');
+    }
+
+    // 5. If Transfer, fetch preferences with Unit Names
+    let enrichedPreferences = [];
+    if (isTransfer) {
+      const prefRows = await query(`
+        SELECT p.unit_id, p.preference_order, p.reason, ou.unit_name
+        FROM sca.transfer_preferences p
+        LEFT JOIN sca.organizational_units ou ON p.unit_id = ou.unit_id
+        WHERE p.transfer_id = @Id
+        ORDER BY p.preference_order`, { Id: requestId });
+      enrichedPreferences = prefRows || [];
+    }
+
+    return {
+      meta: {
+        timestamp: new Date().toISOString(),
+        source_system: 'SCA_Request_Management',
+        event_type: extraData.appeal ? 'request_appeal' : (isTransfer ? 'transfer_request' : 'leave_request'),
+        request_id: requestId,
+        environment: process.env.NODE_ENV || 'production'
+      },
+      request: {
+        id: requestId,
+        type: {
+          id: typeId,
+          name: typeInfo.name,
+          unit: typeInfo.balance_unit,
+          config: parseSettingsJson(typeInfo.fields_config_json),
+          workflow_id: typeInfo.workflow_id
+        },
+        timing: extraData.timing || {
+          start_date: extraData.start_date || extraData.desired_start_date,
+          end_date: extraData.end_date,
+          duration: extraData.duration
+        },
+        custom_fields: extraData.custom_fields || extraData.custom_dynamic_fields || {},
+        validation_rules: rulesRows || [],
+        attachments: attachmentRows || [],
+        transfer_details: isTransfer ? {
+          reason: extraData.reason_for_transfer,
+          willing_to_relocate: extraData.willing_to_relocate,
+          preferred_units: enrichedPreferences
+        } : null,
+        appeal_details: extraData.appeal || null,
+        original_request: extraData.original_request || null
+      },
+      employee: {
+        id: userId,
+        employee_number: userInfo.employee_number,
+        full_name: userInfo.full_name,
+        email: userInfo.email,
+        phone: userInfo.phone_number,
+        organization: {
+          unit_id: userInfo.org_unit_id,
+          unit_name: userInfo.unit_name,
+          grade_code: userInfo.grade_code,
+          grade_name: userInfo.grade_name
+        },
+        balance: balance
+      },
+      manager: managerId ? {
+        id: managerId,
+        full_name: userInfo.manager_name,
+        email: userInfo.manager_email,
+        phone: userInfo.manager_phone
+      } : null,
+      system_context: {
+        auto_approval_eligible: rulesRows && rulesRows.length > 0,
+        is_transfer: !!isTransfer,
+        is_appeal: !!extraData.appeal
+      }
+    };
+  } catch (err) {
+    console.error('Error enriching payload', err);
+    return {
+      meta: { timestamp: new Date().toISOString(), event_type: isTransfer ? 'transfer_request' : 'leave_request' },
+      request: { id: requestId, type_id: typeId, ...extraData },
+      employee: { id: userId }
+    };
+  }
+};
+
 const applyWorkflowDecision = async ({ decision, isTransfer, requestId, rejectionReason }) => {
   if (!decision || !requestId) return null;
   const status = mapDecisionToStatus(decision, isTransfer);
@@ -256,13 +407,17 @@ router.post('/submit-request', async (req, res) => {
 
     const { url: n8nUrl, mode } = await getN8nConfig();
     if (n8nUrl && String(mode).toLowerCase() === 'n8n') {
-      const userRows = await query('SELECT full_name, email, phone_number, job_id, grade_id, org_unit_id FROM sca.users WHERE user_id = @UserId', { UserId: user_id });
-      const userInfo = userRows?.[0] || {};
-      const payload = {
-        meta: { timestamp: new Date().toISOString(), source_system: 'SCA_Request_Management', event_type: 'leave_request' },
-        request: { request_id: reqId, created_at: new Date().toISOString(), type_id: type_id, details: { start_date, end_date, duration }, custom_fields: custom_data || {} },
-        employee: { id: user_id, full_name: userInfo.full_name || employee_name, email: userInfo.email, phone: userInfo.phone_number, org_unit_id: userInfo.org_unit_id }
-      };
+      const payload = await getEnrichedPayload({
+        userId: user_id,
+        typeId: type_id,
+        requestId: reqId,
+        isTransfer: false,
+        extraData: {
+          timing: { start_date, end_date, duration },
+          custom_fields: custom_data || {}
+        }
+      });
+      
       const n8nResponse = await sendToN8nWebhook(n8nUrl, payload);
       let decision = normalizeDecision(n8nResponse);
       if (decision === 'APPROVE' && n8nResponse?.auto_approve !== true) {
@@ -330,27 +485,18 @@ router.post('/appeals', async (req, res) => {
       };
     }
 
-    const payload = {
-      meta: body.meta || { timestamp: submittedAt, source_system: 'SCA_Request_Management', event_type: 'request_appeal' },
-      appeal: { reason, submitted_at: submittedAt, attachments },
-      request: {
-        request_id: requestSnapshot.request_id || requestId,
-        transfer_id: requestSnapshot.transfer_id || null,
-        created_at: requestSnapshot.created_at || null,
-        type_id: requestSnapshot.type_id || requestSnapshot.leave_type_id || null,
-        type_name: requestSnapshot.type_name || requestSnapshot.leave_name || null,
-        status: requestSnapshot.status || null,
-        start_date: requestSnapshot.start_date || null,
-        end_date: requestSnapshot.end_date || null,
-        duration: requestSnapshot.duration || null,
-        unit: requestSnapshot.unit || null,
-        rejection_reason: requestSnapshot.rejection_reason || null,
-        decision_by: requestSnapshot.decision_by || null,
-        custom_data: requestSnapshot.custom_data || {}
-      },
-      employee: employeeInfo,
-      is_transfer: isTransfer
-    };
+    const payload = await getEnrichedPayload({
+      userId: userId,
+      typeId: requestSnapshot.type_id || requestSnapshot.leave_type_id || 0,
+      requestId: requestId,
+      isTransfer: isTransfer,
+      extraData: {
+        appeal: { reason, submitted_at: submittedAt, attachments },
+        original_request: requestSnapshot
+      }
+    });
+    // Override event type for appeals
+    payload.meta.event_type = 'request_appeal';
 
     const result = await sendToAppealsWebhook(url, payload);
     let decision = normalizeDecision(result);
@@ -534,11 +680,19 @@ router.post('/transfer-requests', async (req, res) => {
     let rejectionReason = null;
     const { url: n8nUrl, mode } = await getN8nConfig();
     if (n8nUrl && String(mode).toLowerCase() === 'n8n') {
-      const payload = {
-        meta: { timestamp: new Date().toISOString(), source_system: 'SCA_Request_Management', event_type: 'transfer_request' },
-        request: { transfer_id: transferId, template_id, reason_for_transfer, preferred_units, custom_fields: custom_dynamic_fields || custom_data || {} },
-        employee: { id: userId, employee_id: employeeId }
-      };
+      const payload = await getEnrichedPayload({
+        userId: userId,
+        typeId: template_id,
+        requestId: transferId,
+        isTransfer: true,
+        extraData: {
+          reason_for_transfer,
+          willing_to_relocate,
+          desired_start_date,
+          preferred_units,
+          custom_fields: custom_dynamic_fields || custom_data || {}
+        }
+      });
       const n8nResponse = await sendToN8nWebhook(n8nUrl, payload);
       let decision = normalizeDecision(n8nResponse);
       if (decision === 'APPROVE' && n8nResponse?.auto_approve !== true) {

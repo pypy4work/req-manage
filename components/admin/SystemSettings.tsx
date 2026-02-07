@@ -26,7 +26,13 @@ export const SystemSettingsPanel: React.FC<Props> = ({ onSettingsChange }) => {
   const isBackendManaged = USE_BACKEND;
 
   useEffect(() => {
-    api.admin.getSettings().then(setSettings);
+    api.admin.getSettings().then((data) => {
+      if (data && !data.db_config) {
+        setSettings({ ...data, db_config: { connection_type: 'local_mock', is_connected: true } });
+      } else {
+        setSettings(data);
+      }
+    });
   }, []);
 
   const handleSaveSettings = async () => {

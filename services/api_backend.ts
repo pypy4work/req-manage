@@ -331,6 +331,42 @@ export const api_backend = {
         method: 'POST',
         body: JSON.stringify({ label, value, meta })
       });
+    },
+
+    // Generic DB Methods
+    createTable: async (name: string) => {
+      return await fetch_wrapper('/admin/db/create-table', {
+        method: 'POST',
+        body: JSON.stringify({ name })
+      });
+    },
+    addColumnToTable: async (table: string, name: string, def: any) => {
+      return await fetch_wrapper('/admin/db/add-column', {
+        method: 'POST',
+        body: JSON.stringify({ table, name, def })
+      });
+    },
+    dropColumnFromTable: async (table: string, column: string) => {
+      return await fetch_wrapper(`/admin/db/drop-column?table=${table}&column=${column}`, {
+        method: 'DELETE'
+      });
+    },
+    addTableRow: async (table: string, data: any) => {
+      return await fetch_wrapper('/admin/db/row', {
+        method: 'POST',
+        body: JSON.stringify({ table, data })
+      });
+    },
+    updateTableRow: async (table: string, pk: string, id: any, data: any) => {
+      return await fetch_wrapper('/admin/db/row', {
+        method: 'PUT',
+        body: JSON.stringify({ table, pk, id, data })
+      });
+    },
+    deleteTableRow: async (table: string, pk: string, id: any) => {
+      return await fetch_wrapper(`/admin/db/row?table=${table}&pk=${pk}&id=${id}`, {
+        method: 'DELETE'
+      });
     }
   }
 };

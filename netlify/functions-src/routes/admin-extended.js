@@ -34,6 +34,18 @@ const parseSettingsJson = (raw) => {
   try { return JSON.parse(raw); } catch { return null; }
 };
 
+const normalizeSettings = (raw) => {
+  if (!raw) return DEFAULT_SETTINGS;
+  return {
+    ...DEFAULT_SETTINGS,
+    ...raw,
+    db_config: {
+      ...DEFAULT_SETTINGS.db_config,
+      ...(raw.db_config || {})
+    }
+  };
+};
+
 const getN8nConfig = async () => {
   const envUrl = process.env.N8N_WEBHOOK_URL || process.env.N8N_WEBHOOK || '';
   const envMode = process.env.MODE_TYPE || process.env.N8N_MODE || '';
@@ -101,7 +113,7 @@ router.get('/settings', requirePermission('admin:settings'), async (req, res) =>
   try {
     const rows = await query('SELECT settings_json FROM sca.system_settings WHERE setting_id = 1');
     if (!rows || rows.length === 0) return res.json(DEFAULT_SETTINGS);
-    const settings = parseSettingsJson(rows[0].settings_json) || DEFAULT_SETTINGS;
+    const settings = normalizeSettings(parseSettingsJson(rows[0].settings_json));
     res.json(settings);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -110,7 +122,8 @@ router.get('/settings', requirePermission('admin:settings'), async (req, res) =>
 router.put('/settings', requirePermission('admin:settings'), async (req, res) => {
   try {
     const payload = req.body || {};
-    const settingsJson = JSON.stringify(payload);
+    const normalized = normalizeSettings(payload);
+    const settingsJson = JSON.stringify(normalized);
     const nowFunc = getDialect() === 'postgres' ? 'NOW()' : 'SYSUTCDATETIME()';
     if (getDialect() === 'postgres') {
       await query(
@@ -207,6 +220,82 @@ router.get('/db/table/:name', requirePermission('admin:database'), requireSupaba
     const limitSuffix = getDialect() === 'postgres' ? 'LIMIT 200' : '';
     const rows = await query(`SELECT ${limitPrefix} * FROM sca.${name} ${limitSuffix}`);
     res.json(rows || []);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// POST /api/admin/db/create-table
+router.post('/db/create-table', requirePermission('admin:database'), requireSupabaseActive(), async (req, res) => {
+  try {
+    const { name } = req.body;
+    if (!SAFE_TABLE_RE.test(name)) return res.status(400).json({ error: 'Invalid table name' });
+    const pkey = getDialect() === 'postgres' ? 'id SERIAL PRIMARY KEY' : 'id INT IDENTITY(1,1) PRIMARY KEY';
+    const nowFunc = getDialect() === 'postgres' ? 'TIMESTAMPTZ DEFAULT NOW()' : 'DATETIME DEFAULT GETDATE()';
+    await query(`CREATE TABLE sca.${name} (${pkey}, created_at ${nowFunc})`);
+    res.json({ success: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// POST /api/admin/db/add-column
+router.post('/db/add-column', requirePermission('admin:database'), requireSupabaseActive(), async (req, res) => {
+  try {
+    const { table, name, def } = req.body;
+    if (!SAFE_TABLE_RE.test(table) || !SAFE_TABLE_RE.test(name)) return res.status(400).json({ error: 'Invalid names' });
+    let type = def.type || 'VARCHAR';
+    if (type === 'VARCHAR' && def.length) type = `VARCHAR(${def.length})`;
+    if (type === 'INT' && getDialect() !== 'postgres') type = 'INT';
+    const nullability = def.isNullable ? 'NULL' : 'NOT NULL';
+    await query(`ALTER TABLE sca.${table} ADD ${name} ${type} ${nullability}`);
+    res.json({ success: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// DELETE /api/admin/db/drop-column
+router.delete('/db/drop-column', requirePermission('admin:database'), requireSupabaseActive(), async (req, res) => {
+  try {
+    const { table, column } = req.query;
+    if (!SAFE_TABLE_RE.test(table) || !SAFE_TABLE_RE.test(column)) return res.status(400).json({ error: 'Invalid names' });
+    await query(`ALTER TABLE sca.${table} DROP COLUMN ${column}`);
+    res.json({ success: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// POST /api/admin/db/row
+router.post('/db/row', requirePermission('admin:database'), requireSupabaseActive(), async (req, res) => {
+  try {
+    const { table, data } = req.body;
+    if (!SAFE_TABLE_RE.test(table)) return res.status(400).json({ error: 'Invalid table name' });
+    const keys = Object.keys(data).filter(k => k !== 'id' && k !== 'created_at');
+    if (keys.length === 0) return res.status(400).json({ error: 'No data provided' });
+    const cols = keys.join(', ');
+    const vals = keys.map(k => `@${k}`).join(', ');
+    const params = {};
+    keys.forEach(k => params[k] = data[k]);
+    await query(`INSERT INTO sca.${table} (${cols}) VALUES (${vals})`, params);
+    res.json({ success: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// PUT /api/admin/db/row
+router.put('/db/row', requirePermission('admin:database'), requireSupabaseActive(), async (req, res) => {
+  try {
+    const { table, pk, id, data } = req.body;
+    if (!SAFE_TABLE_RE.test(table) || !SAFE_TABLE_RE.test(pk)) return res.status(400).json({ error: 'Invalid names' });
+    const keys = Object.keys(data).filter(k => k !== pk && k !== 'created_at');
+    const sets = keys.map(k => `${k} = @${k}`).join(', ');
+    const params = { PkValue: id };
+    keys.forEach(k => params[k] = data[k]);
+    await query(`UPDATE sca.${table} SET ${sets} WHERE ${pk} = @PkValue`, params);
+    res.json({ success: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// DELETE /api/admin/db/row
+router.delete('/db/row', requirePermission('admin:database'), requireSupabaseActive(), async (req, res) => {
+  try {
+    const { table, pk, id } = req.query;
+    if (!SAFE_TABLE_RE.test(table) || !SAFE_TABLE_RE.test(pk)) return res.status(400).json({ error: 'Invalid names' });
+    await query(`DELETE FROM sca.${table} WHERE ${pk} = @PkValue`, { PkValue: id });
+    res.json({ success: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 

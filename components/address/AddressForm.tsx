@@ -26,7 +26,7 @@ export const AddressForm: React.FC<AddressFormProps> = ({
   entityId,
   required = false
 }) => {
-  const { t, dir } = useLanguage();
+  const { t, dir, language } = useLanguage();
   const [formData, setFormData] = useState<Address>(address || {
     entity_type: entityType,
     entity_id: entityId,
@@ -76,28 +76,28 @@ export const AddressForm: React.FC<AddressFormProps> = ({
   const getAddressLabel = () => {
     switch (entityType) {
       case 'EMPLOYEE_RESIDENCE':
-        return 'عنوان محل الإقامة';
+        return t('residenceAddress');
       case 'EMPLOYEE_BIRTHPLACE':
-        return 'محل الميلاد';
+        return t('birthPlace');
       case 'ORG_UNIT':
-        return 'عنوان الوحدة الإدارية';
+        return t('orgUnitAddress');
       default:
-        return 'العنوان';
+        return t('address');
     }
   };
 
   return (
-    <div className="space-y-4 p-4 bg-gray-50 dark:bg-slate-800 rounded-lg border border-gray-200 dark:border-gray-700 w-full min-w-0">
+    <div dir={dir} className={`space-y-4 p-4 bg-gray-50 dark:bg-slate-800 rounded-lg border border-gray-200 dark:border-gray-700 w-full min-w-0 ${language === 'ar' ? 'font-arabic' : ''}`}>
       <div className="flex items-center gap-2 mb-4">
-        <MapPin className="w-5 h-5 text-blue-600" />
-        <h3 className="font-bold text-lg">{getAddressLabel()}</h3>
+        <MapPin className={`w-5 h-5 text-blue-600 ${language === 'ar' ? 'ml-1' : ''}`} />
+        <h3 className={`font-bold text-lg ${language === 'ar' ? 'text-right' : ''}`}>{getAddressLabel()}</h3>
       </div>
 
       {/* المحافظة والمدينة */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div>
           <label className="block text-sm font-medium mb-1 text-[var(--text-main)]">
-            المحافظة {required && <span className="text-red-500">*</span>}
+            {t('governorate')} {required && <span className="text-red-500">*</span>}
           </label>
           <select
             value={formData.governorate}
@@ -118,15 +118,17 @@ export const AddressForm: React.FC<AddressFormProps> = ({
             required={required}
             className="w-full border border-[var(--border-color)] rounded-md px-3 py-2 bg-[var(--bg-card)] text-[var(--text-main)] text-sm focus:outline-none focus:ring-2 focus:ring-[var(--primary)]/30"
           >
-            <option value="">اختر المحافظة</option>
+            <option value="">{t('selectGovernorate')}</option>
             {GOVERNORATES.map(g => (
-              <option key={g.id} value={g.name}>{g.name}</option>
+              <option key={g.id} value={language === 'ar' ? g.name_ar : g.name_en}>
+                {language === 'ar' ? g.name_ar : g.name_en}
+              </option>
             ))}
           </select>
         </div>
         <div>
           <label className="block text-sm font-medium mb-1 text-[var(--text-main)]">
-            المدينة/المركز {required && <span className="text-red-500">*</span>}
+            {t('city')} {required && <span className="text-red-500">*</span>}
           </label>
           <select
             value={formData.city}
@@ -146,9 +148,11 @@ export const AddressForm: React.FC<AddressFormProps> = ({
             className="w-full border border-[var(--border-color)] rounded-md px-3 py-2 bg-[var(--bg-card)] text-[var(--text-main)] text-sm focus:outline-none focus:ring-2 focus:ring-[var(--primary)]/30"
             disabled={!formData.governorate}
           >
-            <option value="">{formData.governorate ? 'اختر المدينة/المركز' : 'اختر المحافظة أولاً'}</option>
+            <option value="">{formData.governorate ? t('selectCity') : t('selectGovFirst')}</option>
             {citiesOptions.map(c => (
-              <option key={c.id} value={c.name}>{c.name}</option>
+              <option key={c.id} value={language === 'ar' ? c.name_ar : c.name_en}>
+                {language === 'ar' ? c.name_ar : c.name_en}
+              </option>
             ))}
           </select>
         </div>
@@ -157,7 +161,7 @@ export const AddressForm: React.FC<AddressFormProps> = ({
       {/* الحي/القرية */}
       <div>
         <label className="block text-sm font-medium mb-1 text-[var(--text-main)]">
-          الحي/القرية {required && <span className="text-red-500">*</span>}
+          {t('district')} {required && <span className="text-red-500">*</span>}
         </label>
         <select
           value={formData.district}
@@ -166,9 +170,11 @@ export const AddressForm: React.FC<AddressFormProps> = ({
           className="w-full border border-[var(--border-color)] rounded-md px-3 py-2 bg-[var(--bg-card)] text-[var(--text-main)] text-sm focus:outline-none focus:ring-2 focus:ring-[var(--primary)]/30"
           disabled={!formData.city}
         >
-          <option value="">{formData.city ? 'اختر الحي/القرية' : 'اختر المدينة أولاً'}</option>
+          <option value="">{formData.city ? t('selectDistrict') : t('selectCityFirst')}</option>
           {districtsOptions.map(d => (
-            <option key={d.id} value={d.name}>{d.name}</option>
+            <option key={d.id} value={language === 'ar' ? d.name_ar : d.name_en}>
+              {language === 'ar' ? d.name_ar : d.name_en}
+            </option>
           ))}
         </select>
       </div>
@@ -177,23 +183,23 @@ export const AddressForm: React.FC<AddressFormProps> = ({
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div>
           <label className="block text-sm font-medium mb-1 text-[var(--text-main)]">
-            الشارع
+            {t('street')}
           </label>
           <Input
             value={formData.street || ''}
             onChange={(e) => handleChange('street', e.target.value)}
-            placeholder="اسم الشارع"
+            placeholder={t('street')}
             className="w-full"
           />
         </div>
         <div>
           <label className="block text-sm font-medium mb-1 text-[var(--text-main)]">
-            العقار
+            {t('building')}
           </label>
           <Input
             value={formData.building || ''}
             onChange={(e) => handleChange('building', e.target.value)}
-            placeholder="رقم/اسم العقار"
+            placeholder={t('building')}
             className="w-full"
           />
         </div>
@@ -202,12 +208,12 @@ export const AddressForm: React.FC<AddressFormProps> = ({
       {/* الشقة */}
       <div>
         <label className="block text-sm font-medium mb-1 text-[var(--text-main)]">
-          الشقة
+          {t('apartment')}
         </label>
         <Input
           value={formData.apartment || ''}
           onChange={(e) => handleChange('apartment', e.target.value)}
-          placeholder="رقم الشقة"
+          placeholder={t('apartment')}
           className="w-full"
         />
       </div>
@@ -218,12 +224,12 @@ export const AddressForm: React.FC<AddressFormProps> = ({
           <div className="flex items-center gap-2 mb-3">
             <Navigation className="w-4 h-4 text-green-600" />
             <label className="block text-sm font-medium text-[var(--text-main)]">
-              إحداثيات الموقع (GPS)
+              {t('gpsCoordinates')}
             </label>
           </div>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div>
-              <label className="block text-xs text-[var(--text-muted)] mb-1">خط العرض (Latitude)</label>
+              <label className="block text-xs text-[var(--text-muted)] mb-1">{t('latitude')}</label>
               <Input
                 type="number"
                 step="any"
@@ -234,7 +240,7 @@ export const AddressForm: React.FC<AddressFormProps> = ({
               />
             </div>
             <div>
-              <label className="block text-xs text-[var(--text-muted)] mb-1">خط الطول (Longitude)</label>
+              <label className="block text-xs text-[var(--text-muted)] mb-1">{t('longitude')}</label>
               <Input
                 type="number"
                 step="any"
@@ -253,12 +259,12 @@ export const AddressForm: React.FC<AddressFormProps> = ({
                 size="sm"
               >
                 <Navigation className="w-4 h-4 mr-2" />
-                الحصول على الإحداثيات
+                {t('getCoordinates')}
               </Button>
             </div>
           </div>
           <p className="text-xs text-[var(--text-muted)] mt-2">
-            💡 الإحداثيات تستخدم لحساب المسافة بين موقع العمل ومحل الإقامة
+            {t('gpsHint')}
           </p>
         </div>
       )}
@@ -266,7 +272,7 @@ export const AddressForm: React.FC<AddressFormProps> = ({
       {/* معاينة العنوان الكامل */}
       {(formData.governorate || formData.city || formData.district) && (
         <div className="mt-4 p-3 bg-blue-50 dark:bg-blue-900/20 rounded border border-blue-200 dark:border-blue-800">
-          <p className="text-xs font-bold text-blue-700 dark:text-blue-300 mb-1">معاينة العنوان:</p>
+          <p className="text-xs font-bold text-blue-700 dark:text-blue-300 mb-1">{t('addressPreview')}</p>
           <p className="text-sm text-blue-900 dark:text-blue-200">
             {[
               formData.governorate,
