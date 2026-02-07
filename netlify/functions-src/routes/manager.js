@@ -37,26 +37,32 @@ router.get('/travel-time', async (req, res) => {
       return res.status(400).json({ error: 'Invalid coordinates' });
     }
 
-    const provider = process.env.TRAVEL_API_PROVIDER || '';
+    const provider = process.env.TRAVEL_API_PROVIDER || 'OpenRouteService';
     const baseUrl = process.env.TRAVEL_API_URL || '';
     const apiKey = process.env.TRAVEL_API_KEY || '';
 
-    // إذا تم ضبط خدمة خارجية، نحاول استخدامها (مثال: OSRM)
+    // OpenRouteService (preferred)
     if (baseUrl) {
       try {
-        // مثال تنسيق OSRM: /route/v1/driving/{lon1},{lat1};{lon2},{lat2}?overview=false
-        const url = `${baseUrl.replace(/\/$/, '')}/${lon1},${lat1};${lon2},${lat2}?overview=false&alternatives=false&steps=false`;
+        const url = baseUrl.replace(/\/$/, '');
+        const headers = { 'Content-Type': 'application/json' };
+        if (apiKey) {
+          headers['Authorization'] = apiKey;
+          headers['X-Api-Key'] = apiKey;
+        }
         const resp = await fetch(url, {
-          headers: apiKey ? { 'Authorization': apiKey } : undefined
+          method: 'POST',
+          headers,
+          body: JSON.stringify({ coordinates: [[lon1, lat1], [lon2, lat2]] })
         });
         if (resp.ok) {
           const data = await resp.json();
-          const route = data.routes && data.routes[0];
-          if (route && typeof route.duration === 'number' && typeof route.distance === 'number') {
+          const summary = data?.features?.[0]?.properties?.summary;
+          if (summary && typeof summary.duration === 'number' && typeof summary.distance === 'number') {
             return res.json({
-              provider: provider || 'external',
-              distance_km: route.distance / 1000,
-              travel_time_minutes: Math.round(route.duration / 60)
+              provider: provider || 'OpenRouteService',
+              distance_km: summary.distance / 1000,
+              travel_time_minutes: Math.round(summary.duration / 60)
             });
           }
         }
@@ -93,7 +99,7 @@ router.get('/pending-requests/:managerId', async (req, res) => {
       `SELECT ${limitPrefix} r.request_id, r.user_id, r.employee_name, r.type_id, rt.name AS leave_name, r.status, r.start_date, r.end_date, r.duration, r.unit, r.created_at
        FROM sca.requests r 
        LEFT JOIN sca.request_types rt ON r.type_id = rt.id
-       WHERE r.status = 'PENDING' ORDER BY r.created_at DESC ${limitSuffix}`
+       WHERE r.status IN ('PENDING','MANAGER_REVIEW') ORDER BY r.created_at DESC ${limitSuffix}`
     );
     res.json(rows || []);
   } catch (e) { res.status(500).json({ error: e.message }); }

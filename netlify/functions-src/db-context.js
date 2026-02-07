@@ -5,7 +5,13 @@ const store = new AsyncLocalStorage();
 
 function withRequestContext(req, res, next) {
   const requestId = req.headers['x-request-id'] || crypto.randomUUID();
-  const userId = req.headers['x-user-id'] || req.headers['x-user'] || req.headers['x-actor-id'] || req.body?.user_id || null;
+  const userId =
+    req.user?.user_id ||
+    req.headers['x-user-id'] ||
+    req.headers['x-user'] ||
+    req.headers['x-actor-id'] ||
+    req.body?.user_id ||
+    null;
   const context = {
     requestId,
     userId: userId != null ? String(userId) : null,

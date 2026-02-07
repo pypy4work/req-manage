@@ -82,7 +82,16 @@ function validateSupabaseEnv() {
       supabaseUrl: supabaseUrl ? '[set]' : '[missing]',
       supabaseAnonKey: supabaseKey ? '[set]' : '[missing]',
       postgresConnectionString: supabaseConfig.connectionString ? '[set]' : '[missing]',
-      poolerConnectionString: poolerUrl ? '[set]' : '[missing]'
+      poolerConnectionString: poolerUrl ? '[set]' : '[missing]',
+      connectionSource: supabaseConfig.connectionSource || 'env',
+      connectionTarget: supabaseConfig.connectionTarget
+        ? {
+            user: supabaseConfig.connectionTarget.user || '[missing]',
+            host: supabaseConfig.connectionTarget.host || '[missing]',
+            port: supabaseConfig.connectionTarget.port || null,
+            database: supabaseConfig.connectionTarget.database || '[missing]'
+          }
+        : null
     }
   };
 }

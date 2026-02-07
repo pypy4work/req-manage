@@ -4,6 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle, Button } from '../ui/UICompon
 import { Bot, Shield, CheckCircle2, XCircle, Activity, Play, Terminal, Smartphone, Fingerprint, Mail, RefreshCw, Lock, Bug, Search } from 'lucide-react';
 import { AuthTestResult } from '../../types';
 import { api } from '../../services/api';
+import { USE_BACKEND } from '../../utils/config';
 
 export const AuthDiagnostics: React.FC = () => {
     const [isRunning, setIsRunning] = useState(false);
@@ -38,7 +39,10 @@ export const AuthDiagnostics: React.FC = () => {
                 const start = Date.now();
                 let result: AuthTestResult = { testName: scenario.name, status: 'PASS', latencyMs: 0, message: 'OK', timestamp: new Date().toLocaleTimeString() };
                 try {
-                    if (scenario.type === 'bio') {
+                    if (USE_BACKEND && scenario.type !== 'bio') {
+                        result.status = 'WARNING';
+                        result.message = 'Skipped in backend mode (requires real credentials)';
+                    } else if (scenario.type === 'bio') {
                         const hasBio = await api.auth.hasBiometricEnabled(scenario.id);
                         if (!hasBio) throw new Error("Bio flag missing");
                     } else {

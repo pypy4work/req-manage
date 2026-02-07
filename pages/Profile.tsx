@@ -48,7 +48,7 @@ const buildUnitHistory = (history: CareerHistory[], user: User) => {
   });
 };
 
-export const Profile: React.FC<{ user: User; settings?: SystemSettings | null }> = ({ user, settings }) => {
+export const Profile: React.FC<{ user: User; settings?: SystemSettings | null; onPasswordChanged?: () => void }> = ({ user, settings, onPasswordChanged }) => {
   const [photo, setPhoto] = useState(user.picture_url || "https://picsum.photos/200");
   const [isUploading, setIsUploading] = useState(false);
   const [gradeName, setGradeName] = useState<string>('');
@@ -59,6 +59,7 @@ export const Profile: React.FC<{ user: User; settings?: SystemSettings | null }>
   const { notify } = useNotification();
 
   useEffect(() => {
+    if (user.must_change_password) return;
     const loadLookups = async () => {
       try {
         const [grades, types, users] = await Promise.all([
@@ -75,9 +76,10 @@ export const Profile: React.FC<{ user: User; settings?: SystemSettings | null }>
       } catch { /* non-admin may not have access */ }
     };
     loadLookups();
-  }, [user.grade_id, user.type_id, user.manager_id]);
+  }, [user.grade_id, user.type_id, user.manager_id, user.must_change_password]);
 
   useEffect(() => {
+    if (user.must_change_password) return;
     let active = true;
     const loadHistory = async () => {
       try {
@@ -177,6 +179,7 @@ export const Profile: React.FC<{ user: User; settings?: SystemSettings | null }>
                if (inputValue !== confirmValue) { alert(t('passwordsNoMatch')); setLoading(false); return; }
                await api.auth.changePassword(user.user_id, inputValue);
                alert(t('updateSuccess'));
+               if (onPasswordChanged) onPasswordChanged();
                cancelEdit();
           }
       }
@@ -211,6 +214,15 @@ export const Profile: React.FC<{ user: User; settings?: SystemSettings | null }>
 
   return (
     <div className="max-w-4xl mx-auto space-y-8 pb-4 animate-in fade-in duration-500">
+      {user.must_change_password && (
+        <div className="p-4 rounded-xl border border-amber-300 bg-amber-50 text-amber-800 text-sm flex items-start gap-2">
+          <AlertTriangle className="w-4 h-4 mt-0.5" />
+          <div>
+            <div className="font-bold">تغيير كلمة المرور مطلوب</div>
+            <div className="text-xs mt-1">يرجى تعيين كلمة مرور جديدة قبل متابعة استخدام النظام.</div>
+          </div>
+        </div>
+      )}
       
       {/* Header Profile Card */}
       <div className="relative rounded-2xl bg-gradient-to-r from-[var(--primary)] to-blue-900 text-white p-8 overflow-hidden shadow-lg">

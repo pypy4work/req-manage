@@ -3,6 +3,7 @@ const router = express.Router();
 const { query, getDialect, insertAndGetId, withTransaction } = require('../services/db-service');
 const { requirePermission } = require('../rbac');
 const { requireSupabaseActive } = require('../db-guards');
+const { appendWebhookLog } = require('../utils/webhook-logger');
 const SAFE_TABLE_RE = /^[a-zA-Z0-9_]+$/;
 const hasOwn = (obj, key) => Object.prototype.hasOwnProperty.call(obj || {}, key);
 const toNull = (val) => (val === undefined || val === '' ? null : val);
@@ -50,14 +51,22 @@ const getN8nConfig = async () => {
 
 const sendToN8nWebhook = async (url, payload) => {
   if (!url) return null;
-  const resp = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'X-Source': 'SCA_Request_Management' },
-    body: JSON.stringify(payload)
-  });
-  const text = await resp.text();
-  if (!text) return { success: resp.ok };
-  try { return JSON.parse(text); } catch { return { success: resp.ok, message: text.slice(0, 200) }; }
+  try {
+    const resp = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Source': 'SCA_Request_Management' },
+      body: JSON.stringify(payload)
+    });
+    const text = await resp.text();
+    if (!text) return { success: resp.ok };
+    let parsed;
+    try { parsed = JSON.parse(text); } catch { parsed = { success: resp.ok, message: text.slice(0, 200) }; }
+    await appendWebhookLog({ type: 'n8n', url, payload, response: parsed, status: resp.status, ok: resp.ok });
+    return parsed;
+  } catch (e) {
+    await appendWebhookLog({ type: 'n8n', url, payload, error: e?.message || String(e) });
+    throw e;
+  }
 };
 
 // Import existing admin module for lists

@@ -3,23 +3,50 @@ const DEFAULT_PORTS = {
   mssql: 1433
 };
 
+function normalizeConnectionString(value) {
+  if (!value) return '';
+  const trimmed = String(value).trim();
+  if (!trimmed) return '';
+  if (!/^postgres(ql)?:\/\//i.test(trimmed)) return '';
+  return trimmed;
+}
+
+function parseConnectionTarget(value) {
+  const conn = normalizeConnectionString(value);
+  if (!conn) return null;
+  try {
+    const url = new URL(conn);
+    return {
+      user: url.username || null,
+      host: url.hostname || null,
+      port: url.port ? Number(url.port) : null,
+      database: url.pathname ? url.pathname.replace('/', '') : null
+    };
+  } catch {
+    return null;
+  }
+}
+
 function getSupabaseConfig() {
-  const poolerConnectionString =
+  const poolerConnectionString = normalizeConnectionString(
     process.env.SUPABASE_POOLER_URL ||
     process.env.SUPABASE_DB_URL_POOLER ||
     process.env.POSTGRES_POOLER_URL ||
     process.env.PGPOOLER_URL ||
     process.env.PG_BOUNCER_URL ||
-    '';
+    ''
+  );
 
-  const directConnectionString =
+  const directConnectionString = normalizeConnectionString(
     process.env.SUPABASE_DB_URL ||
     process.env.POSTGRES_URL ||
     process.env.DATABASE_URL ||
     process.env.PG_CONNECTION_STRING ||
-    '';
+    ''
+  );
 
   const connectionString = poolerConnectionString || directConnectionString || '';
+  const connectionSource = poolerConnectionString ? 'pooler' : (directConnectionString ? 'direct' : 'env');
 
   const host = process.env.DB_HOST || process.env.PGHOST || '';
   const port = process.env.DB_PORT || process.env.PGPORT || DEFAULT_PORTS.postgres;
@@ -39,7 +66,9 @@ function getSupabaseConfig() {
     database,
     user,
     password,
-    ssl: ssl ? { rejectUnauthorized: false } : undefined
+    ssl: ssl ? { rejectUnauthorized: false } : undefined,
+    connectionSource,
+    connectionTarget: parseConnectionTarget(connectionString)
   };
 }
 

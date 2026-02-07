@@ -77,6 +77,9 @@ function AppContent() {
   const [isRootAdmin, setIsRootAdmin] = useState(false);
   const [userPermissions, setUserPermissions] = useState<PermissionKey[]>([]);
   const [navKey, setNavKey] = useState(0);
+  const [forcePasswordChange, setForcePasswordChange] = useState(() => {
+      try { return localStorage.getItem('sca_force_password_change') === 'true'; } catch { return false; }
+  });
   
   // State for the Welcome Transition
   const [showWelcome, setShowWelcome] = useState(false);
@@ -193,14 +196,25 @@ function AppContent() {
       setUserPermissions([]);
       setRoute('#/');
       window.location.hash = '#/';
-      try { localStorage.removeItem('sca_user_id'); } catch {}
+      try {
+          api.auth.logout?.();
+          localStorage.removeItem('sca_user_id');
+          localStorage.removeItem('sca_auth_token');
+      } catch {}
   };
 
   const handleLoginSuccess = (loggedInUser: User) => {
       setUser(loggedInUser);
       api.auth.getUserPermissions(loggedInUser.user_id).then(setUserPermissions).catch(() => setUserPermissions([]));
-      window.location.hash = '#/';
-      setRoute('#/');
+      const mustChange = !!loggedInUser.must_change_password;
+      setForcePasswordChange(mustChange);
+      if (mustChange) {
+          window.location.hash = '#/profile';
+          setRoute('#/profile');
+      } else {
+          window.location.hash = '#/';
+          setRoute('#/');
+      }
       try { localStorage.setItem('sca_user_id', String(loggedInUser.user_id)); } catch {}
       
       // Check if admin is root-level
@@ -208,7 +222,7 @@ function AppContent() {
           checkAdminRootStatus(loggedInUser.user_id);
       }
       
-      setShowWelcome(true);
+      if (!mustChange) setShowWelcome(true);
       // Show welcome screen for 3 seconds then transition to dashboard
       setTimeout(() => {
           setShowWelcome(false);
@@ -424,11 +438,25 @@ function AppContent() {
     }
 
     // 3. Normal Flow
-    if (route === '#/profile') {
+    if (route === '#/profile' || (forcePasswordChange && route !== '#/profile')) {
+      if (forcePasswordChange && route !== '#/profile') {
+        window.location.hash = '#/profile';
+        setRoute('#/profile');
+      }
       return (
         <ErrorBoundary>
             <Layout user={user} currentRoute={route} onLogout={handleLogout} onOpenTheme={() => setShowThemePanel(true)} settings={settings} permissions={userPermissions} onNavigate={handleNavigate}>
-              <Profile user={user} settings={settings} />
+              <Profile
+                user={user}
+                settings={settings}
+                onPasswordChanged={() => {
+                  setForcePasswordChange(false);
+                  setUser(prev => prev ? { ...prev, must_change_password: false } : prev);
+                  try { localStorage.removeItem('sca_force_password_change'); } catch {}
+                  window.location.hash = '#/';
+                  setRoute('#/');
+                }}
+              />
             </Layout>
         </ErrorBoundary>
       );

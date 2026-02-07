@@ -110,8 +110,14 @@ export const Login: React.FC<LoginProps> = ({ onLogin, onOpenTheme, settings }) 
       const result = await api.auth.login(identifier, password);
       
       if (result.status === 'SUCCESS' && result.user) {
+         const requiresChange = !!result.must_change_password;
+         const userPayload = { ...result.user, must_change_password: requiresChange };
+         if (requiresChange) {
+             try { localStorage.setItem('sca_force_password_change', 'true'); } catch {}
+             notify({ type: 'warning', title: 'Security Notice', message: 'Please change your password on first login.' });
+         }
          notify({ type: 'success', title: 'Welcome Back', message: 'Login successful.' });
-         onLogin(result.user);
+         onLogin(userPayload);
       } else if (result.status === '2FA_REQUIRED' && result.userId) {
          setTempUserId(result.userId); 
          setIs2FARequired(true);

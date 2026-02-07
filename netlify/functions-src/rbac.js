@@ -2,7 +2,15 @@ const { query } = require('./db-repository');
 const { isProduction } = require('./db-router');
 
 function getUserId(req) {
-  return req.headers['x-user-id'] || req.headers['x-user'] || req.headers['x-actor-id'] || req.body?.user_id || req.query?.user_id || null;
+  return (
+    req.user?.user_id ||
+    req.headers['x-user-id'] ||
+    req.headers['x-user'] ||
+    req.headers['x-actor-id'] ||
+    req.body?.user_id ||
+    req.query?.user_id ||
+    null
+  );
 }
 
 function allowBypass() {

@@ -14,11 +14,14 @@ const getDefaultDbConfig = (): DatabaseConfig => ({
     is_connected: true
 });
 
+const ENV_N8N_WEBHOOK_URL = (import.meta as any)?.env?.VITE_N8N_WEBHOOK_URL || '';
+const ENV_APPEALS_WEBHOOK_URL = (import.meta as any)?.env?.VITE_APPEALS_WEBHOOK_URL || ENV_N8N_WEBHOOK_URL || '';
+
 const DEFAULT_SETTINGS: SystemSettings = {
     setting_id: 1, 
     mode_type: ModeType.MANUAL, 
-    n8n_webhook_url: '',
-    appeals_webhook_url: '',
+    n8n_webhook_url: ENV_N8N_WEBHOOK_URL,
+    appeals_webhook_url: ENV_APPEALS_WEBHOOK_URL,
     system_title: 'SCA Requests', 
     system_subtitle: 'Suez Canal Authority',
     system_logo_url: "https://upload.wikimedia.org/wikipedia/en/a/a2/Suez_Canal_Authority_logo.png",
@@ -40,6 +43,7 @@ const normalizeSettings = (raw?: Partial<SystemSettings>): SystemSettings => {
     return {
         ...base,
         ...raw,
+        appeals_webhook_url: raw.appeals_webhook_url || raw.n8n_webhook_url || base.appeals_webhook_url,
         db_config: {
             ...base.db_config,
             ...(raw.db_config || {})
@@ -102,7 +106,7 @@ const sendToN8nWebhook = async (payload: object): Promise<N8nWebhookResponse | n
  * Intended for grievance/appeal workflow (separate from N8N rules webhook).
  */
 const sendToAppealsWebhook = async (payload: object): Promise<N8nWebhookResponse | null> => {
-    const url = db_settings.appeals_webhook_url?.trim();
+    const url = db_settings.appeals_webhook_url?.trim() || db_settings.n8n_webhook_url?.trim();
     if (!url) return null;
     try {
         const res = await fetch(url, {
@@ -609,6 +613,13 @@ export const api = {
         
         return { status: 'SUCCESS', user: hydratedUser } as LoginResult;
     },
+    logout: async () => {
+        if (shouldUseBackend() && api_backend.auth.logout) {
+            await api_backend.auth.logout();
+            return true;
+        }
+        return true;
+    },
     verify2FALogin: async (userId: number, otp: string, role?: Role) => {
         // Mock verification
         const user = db_users.find(u => u.user_id === userId);
@@ -634,7 +645,14 @@ export const api = {
     },
     sendOTP: async (contact: string) => "1234",
     verifyOTP: async (contact: string, code: string) => true,
-    changePassword: async (userId: number, newPass: string) => {},
+    changePassword: async (userId: number, newPass: string) => {
+        if (shouldUseBackend() && api_backend.auth.changePassword) {
+            return await api_backend.auth.changePassword(newPass);
+        }
+        // Mock: accept and clear force flag
+        try { localStorage.removeItem('sca_force_password_change'); } catch {}
+        return true;
+    },
     updateContactInfo: async (userId: number, type: 'email' | 'phone', value: string) => {},
     toggle2FA: async (userId: number, enabled: boolean) => {},
     updateProfilePicture: async (userId: number, url: string) => {
@@ -726,6 +744,9 @@ export const api = {
       submitAppeal: async (appeal: { request: GenericRequest; reason: string; attachments?: { fileId: string; fileName: string; fileUrl: string; mimeType: string }[]; is_transfer?: boolean }) => {
           if (shouldUseBackend()) return await api_backend.employee.submitAppeal(appeal);
           await smartDelay(250);
+
+          const url = db_settings.appeals_webhook_url?.trim() || db_settings.n8n_webhook_url?.trim();
+          if (!url) throw new Error('Workflow webhook URL not configured.');
 
           const req = appeal.request;
           const submittedAt = new Date().toISOString();

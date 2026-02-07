@@ -41,7 +41,8 @@ export enum RequestStatusCode {
   APPROVED = 'APPROVED',
   REJECTED = 'REJECTED',
   ESCALATED = 'ESCALATED',
-  DRAFT = 'DRAFT'
+  DRAFT = 'DRAFT',
+  MANAGER_REVIEW = 'MANAGER_REVIEW'
 }
 
 // Aliases for compatibility
@@ -223,6 +224,7 @@ export interface User {
   // Security flags
   is_2fa_enabled?: boolean;
   biometric_credential_id?: string;
+  must_change_password?: boolean;
 }
 
 // 2. User Credentials (Sensitive - Used in Login/Profile Edit only)
@@ -244,6 +246,11 @@ export interface LoginResult {
   userId?: number;
   contactMethod?: string;
   message?: string;
+  token?: string;
+  token_type?: 'Bearer';
+  expires_in?: string;
+  expires_at?: string;
+  must_change_password?: boolean;
 }
 
 // --- ENTERPRISE TABLES (Added for DB Consistency) ---

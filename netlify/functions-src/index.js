@@ -19,6 +19,7 @@ for (const envPath of envCandidates) {
 const { initDbRouter, getRouterState } = require('./db');
 const { withRequestContext } = require('./db-context');
 const { createRateLimiter } = require('./rate-limit');
+const { authenticateRequest, requireAuth } = require('./middleware/auth');
 
 const adminRoutes = require('./routes/admin');
 const adminExtendedRoutes = require('./routes/admin-extended');
@@ -61,6 +62,7 @@ app.use(cors({
   credentials: true
 }));
 
+app.use(authenticateRequest);
 app.use(bodyParser.json({ limit: '5mb' }));
 app.use(bodyParser.urlencoded({ extended: true }));
 app.use(withRequestContext);
@@ -74,11 +76,11 @@ app.use((req, res, next) => {
 });
 
 // Routes
-app.use(`${apiBase}/admin`, adminRoutes);
-app.use(`${apiBase}/admin`, adminExtendedRoutes); // Extended admin routes
+app.use(`${apiBase}/admin`, requireAuth(), adminRoutes);
+app.use(`${apiBase}/admin`, requireAuth(), adminExtendedRoutes); // Extended admin routes
 app.use(`${apiBase}/auth`, authRoutes);
-app.use(`${apiBase}/employee`, employeeRoutes);
-app.use(`${apiBase}/manager`, managerRoutes);
+app.use(`${apiBase}/employee`, requireAuth(), employeeRoutes);
+app.use(`${apiBase}/manager`, requireAuth(), managerRoutes);
 app.use(`${apiBase}/system`, systemRoutes);
 // Fallback: if API prefix mismatch, still expose /system routes.
 if (apiBase !== '/system' && apiBase !== '') {

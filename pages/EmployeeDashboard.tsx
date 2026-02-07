@@ -42,7 +42,7 @@ export const EmployeeDashboard: React.FC<EmployeeDashboardProps> = ({ user, view
   const totalEntitlementDays = normalizedBalances.filter(b => b.unit !== 'hours').reduce((sum, b) => sum + (b.total || 0), 0);
   const totalRemainingHours = normalizedBalances.filter(b => b.unit === 'hours').reduce((sum, b) => sum + (b.remaining || 0), 0);
   const totalEntitlementHours = normalizedBalances.filter(b => b.unit === 'hours').reduce((sum, b) => sum + (b.total || 0), 0);
-  const pendingCount = requests.filter(r => r.status === RequestStatus.PENDING || r.status === 'PENDING').length;
+  const pendingCount = requests.filter(r => r.status === RequestStatus.PENDING || r.status === RequestStatus.MANAGER_REVIEW || r.status === 'PENDING' || r.status === 'MANAGER_REVIEW').length;
 
   useEffect(() => {
     fetchData();
@@ -183,7 +183,7 @@ export const EmployeeDashboard: React.FC<EmployeeDashboardProps> = ({ user, view
   };
 
   const renderDecisionInfo = (req: LeaveRequest) => {
-      if (req.status === RequestStatus.PENDING) return null;
+      if (req.status === RequestStatus.PENDING || req.status === RequestStatus.MANAGER_REVIEW) return null;
       const isRejected = req.status === RequestStatus.REJECTED;
       const appealMeta = getAppealMeta(req);
       const hasAppeal = !!appealMeta?.submitted_at;
@@ -330,7 +330,7 @@ export const EmployeeDashboard: React.FC<EmployeeDashboardProps> = ({ user, view
       );
   };
 
-  const AppealModal = () => {
+  const renderAppealModal = () => {
       if (!appealRequest) return null;
       const isTransfer = (appealRequest as any).transfer_id != null;
       const appealMeta = getAppealMeta(appealRequest);
@@ -484,7 +484,7 @@ export const EmployeeDashboard: React.FC<EmployeeDashboardProps> = ({ user, view
     return (
       <div className="space-y-6">
         <RequestDetailsModal />
-        <AppealModal />
+        {renderAppealModal()}
         
         <div className="flex items-center justify-between">
             <div>
@@ -562,7 +562,7 @@ export const EmployeeDashboard: React.FC<EmployeeDashboardProps> = ({ user, view
                   </div>
 
                   {/* Decision Info Footer */}
-                  {r.status !== RequestStatus.PENDING && (
+                  {r.status !== RequestStatus.PENDING && r.status !== RequestStatus.MANAGER_REVIEW && (
                      <div className="mt-4 pt-3 border-t border-[var(--border-color)]/60 animate-in fade-in slide-in-from-top-1">
                         {renderDecisionInfo(r)}
                      </div>

@@ -65,6 +65,7 @@ async function initDbRouter(force = false) {
     state.misconfiguration = null;
 
     const prod = isProduction();
+    const requireSupabase = routerConfig.requireSupabase && prod;
     const allowFallback = routerConfig.allowFallback || !prod;
     const forceNoMock = prod && process.env.DB_ROUTER_ALLOW_MOCK_IN_PROD !== 'true';
     const allowMock = (routerConfig.allowMock || !prod) && !forceNoMock;
@@ -73,9 +74,9 @@ async function initDbRouter(force = false) {
     let active = null;
     if (supabaseHealth.ok) {
       active = 'supabase';
-    } else if (allowFallback && mssqlHealth.ok) {
+    } else if (!requireSupabase && allowFallback && mssqlHealth.ok) {
       active = 'mssql';
-    } else if (allowMock) {
+    } else if (!requireSupabase && allowMock) {
       active = 'mock';
     }
 

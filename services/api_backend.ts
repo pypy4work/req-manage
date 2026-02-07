@@ -13,6 +13,8 @@ const baseHeaders = { 'Content-Type': 'application/json' };
 const buildHeaders = () => {
   const headers: Record<string, string> = { ...baseHeaders };
   try {
+    const token = localStorage.getItem('sca_auth_token');
+    if (token) headers['Authorization'] = `Bearer ${token}`;
     const userId = localStorage.getItem('sca_user_id');
     if (userId) headers['X-User-Id'] = userId;
   } catch {
@@ -44,6 +46,40 @@ export const api_backend = {
         method: 'POST',
         body: JSON.stringify({ identifier, password })
       });
+      try {
+        if (data?.token) localStorage.setItem('sca_auth_token', data.token);
+        if (data?.user?.user_id) localStorage.setItem('sca_user_id', String(data.user.user_id));
+        if (data?.must_change_password) {
+          localStorage.setItem('sca_force_password_change', 'true');
+        } else {
+          localStorage.removeItem('sca_force_password_change');
+        }
+      } catch {
+        // ignore localStorage errors
+      }
+      return data;
+    },
+    logout: async (): Promise<void> => {
+      await fetch_wrapper('/auth/logout', { method: 'POST' });
+      try {
+        localStorage.removeItem('sca_auth_token');
+        localStorage.removeItem('sca_user_id');
+        localStorage.removeItem('sca_force_password_change');
+      } catch {
+        // ignore localStorage errors
+      }
+    },
+    changePassword: async (newPassword: string): Promise<LoginResult> => {
+      const data = await fetch_wrapper('/auth/change-password', {
+        method: 'POST',
+        body: JSON.stringify({ newPassword })
+      });
+      try {
+        if (data?.token) localStorage.setItem('sca_auth_token', data.token);
+        localStorage.removeItem('sca_force_password_change');
+      } catch {
+        // ignore localStorage errors
+      }
       return data;
     }
   },
@@ -295,10 +331,6 @@ export const api_backend = {
         method: 'POST',
         body: JSON.stringify({ label, value, meta })
       });
-    },
-
-    deleteUser: async (id: number) => {
-      return await fetch_wrapper(`/admin/users/${id}`, { method: 'DELETE' });
     }
   }
 };

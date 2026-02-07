@@ -34,7 +34,11 @@ export const SystemSettingsPanel: React.FC<Props> = ({ onSettingsChange }) => {
     setIsSaving(true);
     
     // 1. Save to Backend (and LocalStorage via API)
-    await api.admin.updateSettings(settings);
+    const normalized = {
+        ...settings,
+        appeals_webhook_url: settings.n8n_webhook_url || settings.appeals_webhook_url || ''
+    };
+    await api.admin.updateSettings(normalized);
     
     setIsSaving(false);
     
@@ -43,7 +47,7 @@ export const SystemSettingsPanel: React.FC<Props> = ({ onSettingsChange }) => {
     // 2. IMMEDIATE PROPAGATION to Root App
     // We pass a *new* object reference to force React Context/State updates in parents
     if (onSettingsChange) {
-        onSettingsChange({ ...settings, updated_at: new Date().toISOString() });
+        onSettingsChange({ ...normalized, updated_at: new Date().toISOString() });
     }
   };
 
@@ -403,7 +407,7 @@ export const SystemSettingsPanel: React.FC<Props> = ({ onSettingsChange }) => {
                             <label className="block text-sm font-bold mb-2 text-[var(--text-main)] flex justify-between items-center">{t('webhookUrl')} {settings.mode_type === ModeType.N8N && <span className="text-[10px] text-green-600 flex items-center gap-1 animate-pulse"><Zap className="w-3 h-3 fill-green-600" /> Active</span>}</label>
                             <div className="flex items-center shadow-sm rounded-lg overflow-hidden border border-[var(--border-color)] focus-within:ring-2 focus-within:ring-[var(--primary)]">
                                 <div className="bg-[var(--bg-body)] border-l border-[var(--border-color)] px-4 py-3 text-[var(--text-muted)] text-xs font-mono font-bold">POST</div>
-                                <input value={settings.n8n_webhook_url} onChange={(e) => setSettings({...settings, n8n_webhook_url: e.target.value})} placeholder="https://your-n8n-instance.com/webhook/..." className="flex-1 bg-[var(--bg-card)] text-[var(--text-main)] p-3 text-sm font-mono focus:outline-none dir-ltr" />
+                                <input value={settings.n8n_webhook_url} onChange={(e) => setSettings({...settings, n8n_webhook_url: e.target.value, appeals_webhook_url: e.target.value})} placeholder="https://your-n8n-instance.com/webhook/..." className="flex-1 bg-[var(--bg-card)] text-[var(--text-main)] p-3 text-sm font-mono focus:outline-none dir-ltr" />
                             </div>
                             <p className="text-xs text-[var(--text-muted)] mt-2 flex items-start gap-1"><Info className="w-3 h-3 mt-0.5 shrink-0" /> {t('webhookHint')}</p>
                             <div className="pt-2">
@@ -413,13 +417,16 @@ export const SystemSettingsPanel: React.FC<Props> = ({ onSettingsChange }) => {
                                 </Button>
                             </div>
                         </div>
-                        <div className="transition-all duration-300">
-                            <label className="block text-sm font-bold mb-2 text-[var(--text-main)] flex justify-between items-center">{t('appealWebhookUrl')} <span className="text-[10px] text-amber-600 bg-amber-100 px-2 py-0.5 rounded-full">{t('appealTag')}</span></label>
-                            <div className="flex items-center shadow-sm rounded-lg overflow-hidden border border-[var(--border-color)] focus-within:ring-2 focus-within:ring-[var(--primary)]">
-                                <div className="bg-[var(--bg-body)] border-l border-[var(--border-color)] px-4 py-3 text-[var(--text-muted)] text-xs font-mono font-bold">POST</div>
-                                <input value={settings.appeals_webhook_url || ''} onChange={(e) => setSettings({...settings, appeals_webhook_url: e.target.value})} placeholder="https://your-appeals-webhook.com/..." className="flex-1 bg-[var(--bg-card)] text-[var(--text-main)] p-3 text-sm font-mono focus:outline-none dir-ltr" />
+                        <div className="rounded-xl border border-dashed border-[var(--border-color)] p-4 text-xs text-[var(--text-muted)] bg-[var(--bg-body)]">
+                            <div className="flex items-center gap-2 font-semibold text-[var(--text-main)] mb-1">
+                                <Info className="w-3 h-3" />
+                                Unified Webhook
                             </div>
-                            <p className="text-xs text-[var(--text-muted)] mt-2 flex items-start gap-1"><Info className="w-3 h-3 mt-0.5 shrink-0" /> {t('appealWebhookHint')}</p>
+                            <p>
+                                Appeals and request workflows now use the same N8N webhook URL. The workflow should branch based on
+                                <span className="font-mono"> meta.event_type </span>
+                                (e.g. <span className="font-mono">leave_request</span>, <span className="font-mono">transfer_request</span>, <span className="font-mono">request_appeal</span>).
+                            </p>
                         </div>
                     </CardContent>
                 </Card>
@@ -442,7 +449,7 @@ export const SystemSettingsPanel: React.FC<Props> = ({ onSettingsChange }) => {
                                 مزود الخدمة (اختياري)
                             </label>
                             <Input
-                                placeholder="مثال: OSRM, OpenRouteService"
+                                placeholder="OpenRouteService"
                                 value={settings.travel_api_provider || ''}
                                 onChange={(e) => setSettings({ ...settings, travel_api_provider: e.target.value })}
                             />
@@ -452,7 +459,7 @@ export const SystemSettingsPanel: React.FC<Props> = ({ onSettingsChange }) => {
                                 رابط خدمة حساب المسار (Travel API URL)
                             </label>
                             <Input
-                                placeholder="مثال: https://router.project-osrm.org/route/v1/driving"
+                                placeholder="مثال: https://api.openrouteservice.org/v2/directions/driving-car"
                                 value={settings.travel_api_url || ''}
                                 onChange={(e) => setSettings({ ...settings, travel_api_url: e.target.value })}
                                 className="dir-ltr"

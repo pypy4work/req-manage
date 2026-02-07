@@ -40,6 +40,7 @@ export const translations = {
     status_REJECTED: 'مرفوض',
     status_ESCALATED: 'محال للمستوى الأعلى',
     status_DRAFT: 'مسودة',
+    status_MANAGER_REVIEW: 'مراجعة المدير',
 
     // Roles & HR
     role: 'الصلاحية',
@@ -324,6 +325,7 @@ export const translations = {
     status_REJECTED: 'Rejected',
     status_ESCALATED: 'Escalated',
     status_DRAFT: 'Draft',
+    status_MANAGER_REVIEW: 'Manager Review',
 
     // Roles & HR
     role: 'System Role',

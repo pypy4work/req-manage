@@ -1,11 +1,35 @@
 const express = require('express');
 const router = express.Router();
 const { query, getDialect, insertAndGetId, withTransaction } = require('../services/db-service');
+const { appendWebhookLog } = require('../utils/webhook-logger');
 
 const parseSettingsJson = (raw) => {
   if (!raw) return null;
   if (typeof raw === 'object') return raw;
   try { return JSON.parse(raw); } catch { return null; }
+};
+
+const normalizeDecision = (response) => {
+  if (!response) return null;
+  const raw = String(
+    response.recommendation ||
+    response.status ||
+    response.decision ||
+    ''
+  ).toUpperCase();
+  if (!raw) return null;
+  if (['APPROVE', 'APPROVED'].includes(raw)) return 'APPROVE';
+  if (['REJECT', 'REJECTED', 'DECLINE', 'DENY'].includes(raw)) return 'REJECT';
+  if (['MANAGER_REVIEW', 'MANUAL_REVIEW', 'HUMAN_REVIEW', 'ESCALATE', 'ESCALATED'].includes(raw)) return 'MANAGER_REVIEW';
+  return null;
+};
+
+const mapDecisionToStatus = (decision, isTransfer) => {
+  if (!decision) return null;
+  if (decision === 'APPROVE') return isTransfer ? 'HR_APPROVED' : 'APPROVED';
+  if (decision === 'REJECT') return 'REJECTED';
+  if (decision === 'MANAGER_REVIEW') return 'MANAGER_REVIEW';
+  return null;
 };
 
 const getN8nConfig = async () => {
@@ -29,12 +53,14 @@ const getAppealsConfig = async () => {
     process.env.APPEAL_WEBHOOK_URL ||
     process.env.N8N_APPEALS_WEBHOOK_URL ||
     process.env.N8N_APPEAL_WEBHOOK_URL ||
+    process.env.N8N_WEBHOOK_URL ||
+    process.env.N8N_WEBHOOK ||
     '';
   try {
     const rows = await query('SELECT settings_json FROM sca.system_settings WHERE setting_id = 1');
     const settings = parseSettingsJson(rows?.[0]?.settings_json);
     return {
-      url: (settings?.appeals_webhook_url || envUrl || '').trim()
+      url: (settings?.appeals_webhook_url || settings?.n8n_webhook_url || envUrl || '').trim()
     };
   } catch {
     return { url: envUrl };
@@ -51,9 +77,13 @@ const sendToN8nWebhook = async (url, payload) => {
     });
     const text = await resp.text();
     if (!text) return { success: resp.ok };
-    try { return JSON.parse(text); } catch { return { success: resp.ok, message: text.slice(0, 200) }; }
+    let parsed;
+    try { parsed = JSON.parse(text); } catch { parsed = { success: resp.ok, message: text.slice(0, 200) }; }
+    await appendWebhookLog({ type: 'n8n', url, payload, response: parsed, status: resp.status, ok: resp.ok });
+    return parsed;
   } catch (e) {
     console.warn('N8N webhook failed', e);
+    await appendWebhookLog({ type: 'n8n', url, payload, error: e?.message || String(e) });
     return null;
   }
 };
@@ -68,11 +98,56 @@ const sendToAppealsWebhook = async (url, payload) => {
     });
     const text = await resp.text();
     if (!text) return { success: resp.ok };
-    try { return JSON.parse(text); } catch { return { success: resp.ok, message: text.slice(0, 200) }; }
+    let parsed;
+    try { parsed = JSON.parse(text); } catch { parsed = { success: resp.ok, message: text.slice(0, 200) }; }
+    await appendWebhookLog({ type: 'appeals', url, payload, response: parsed, status: resp.status, ok: resp.ok });
+    return parsed;
   } catch (e) {
     console.warn('Appeals webhook failed', e);
+    await appendWebhookLog({ type: 'appeals', url, payload, error: e?.message || String(e) });
     return null;
   }
+};
+
+const applyWorkflowDecision = async ({ decision, isTransfer, requestId, rejectionReason }) => {
+  if (!decision || !requestId) return null;
+  const status = mapDecisionToStatus(decision, isTransfer);
+  if (!status) return null;
+  const nowFunc = getDialect() === 'postgres' ? 'NOW()' : 'GETDATE()';
+
+  if (isTransfer) {
+    await query(
+      `UPDATE sca.transfer_requests
+       SET status = @Status,
+           decision_by = @DecisionBy,
+           decision_at = ${nowFunc},
+           rejection_reason = @Rejection
+       WHERE transfer_id = @Id`,
+      {
+        Status: status,
+        DecisionBy: 'N8N_Workflow',
+        Rejection: rejectionReason || null,
+        Id: requestId
+      }
+    );
+    return status;
+  }
+
+  await query(
+    `UPDATE sca.requests
+     SET status = @Status,
+         decision_by = @DecisionBy,
+         decision_at = ${nowFunc},
+         rejection_reason = @Rejection
+     WHERE request_id = @Id`,
+    {
+      Status: status,
+      DecisionBy: 'N8N_Workflow',
+      Rejection: rejectionReason || null,
+      Id: requestId
+    }
+  );
+  return status;
 };
 
 // GET /api/employee/balances
@@ -178,8 +253,6 @@ router.post('/submit-request', async (req, res) => {
     }, 'request_id');
     let finalStatus = 'PENDING';
     let rejectionReason = null;
-    let decisionBy = null;
-    let decisionAt = null;
 
     const { url: n8nUrl, mode } = await getN8nConfig();
     if (n8nUrl && String(mode).toLowerCase() === 'n8n') {
@@ -191,23 +264,18 @@ router.post('/submit-request', async (req, res) => {
         employee: { id: user_id, full_name: userInfo.full_name || employee_name, email: userInfo.email, phone: userInfo.phone_number, org_unit_id: userInfo.org_unit_id }
       };
       const n8nResponse = await sendToN8nWebhook(n8nUrl, payload);
-      if (n8nResponse?.auto_approve && n8nResponse?.recommendation === 'APPROVE') {
-        finalStatus = 'APPROVED';
-        decisionBy = 'N8N_Workflow';
-        decisionAt = new Date().toISOString();
-      } else if (n8nResponse?.recommendation === 'REJECT') {
-        finalStatus = 'REJECTED';
-        decisionBy = 'N8N_Workflow';
-        decisionAt = new Date().toISOString();
-        rejectionReason = n8nResponse?.rejection_reason || null;
+      let decision = normalizeDecision(n8nResponse);
+      if (decision === 'APPROVE' && n8nResponse?.auto_approve !== true) {
+        decision = 'MANAGER_REVIEW';
       }
-
-      if (finalStatus !== 'PENDING') {
-        await query(
-          `UPDATE sca.requests SET status = @Status, decision_by = @DecisionBy, decision_at = ${nowFunc}, rejection_reason = @Rejection WHERE request_id = @Id`,
-          { Status: finalStatus, DecisionBy: decisionBy, Rejection: rejectionReason, Id: reqId }
-        );
-      }
+      rejectionReason = n8nResponse?.rejection_reason || null;
+      const applied = await applyWorkflowDecision({
+        decision,
+        isTransfer: false,
+        requestId: reqId,
+        rejectionReason
+      });
+      if (applied) finalStatus = applied;
     }
 
     res.json({ request_id: reqId, status: finalStatus, rejection_reason: rejectionReason });
@@ -285,6 +353,16 @@ router.post('/appeals', async (req, res) => {
     };
 
     const result = await sendToAppealsWebhook(url, payload);
+    let decision = normalizeDecision(result);
+    if (decision === 'APPROVE' && result?.auto_approve !== true) {
+      decision = 'MANAGER_REVIEW';
+    }
+    const decisionStatus = await applyWorkflowDecision({
+      decision,
+      isTransfer,
+      requestId,
+      rejectionReason: result?.rejection_reason || null
+    });
 
     // Persist appeal meta into request custom data (best-effort)
     try {
@@ -312,7 +390,7 @@ router.post('/appeals', async (req, res) => {
       console.warn('Appeal persistence failed', err);
     }
 
-    res.json({ success: true, response: result });
+    res.json({ success: true, response: result, status: decisionStatus || null });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -462,22 +540,18 @@ router.post('/transfer-requests', async (req, res) => {
         employee: { id: userId, employee_id: employeeId }
       };
       const n8nResponse = await sendToN8nWebhook(n8nUrl, payload);
-      if (n8nResponse?.auto_approve && n8nResponse?.recommendation === 'APPROVE') {
-        finalStatus = 'HR_APPROVED';
-      } else if (n8nResponse?.recommendation === 'REJECT') {
-        finalStatus = 'REJECTED';
-        rejectionReason = n8nResponse?.rejection_reason || null;
+      let decision = normalizeDecision(n8nResponse);
+      if (decision === 'APPROVE' && n8nResponse?.auto_approve !== true) {
+        decision = 'MANAGER_REVIEW';
       }
-
-      if (finalStatus !== 'PENDING') {
-        const nowFunc = getDialect() === 'postgres' ? 'NOW()' : 'GETDATE()';
-        await query(
-          `UPDATE sca.transfer_requests
-           SET status = @Status, decision_by = @DecisionBy, decision_at = ${nowFunc}, rejection_reason = @Rejection
-           WHERE transfer_id = @TransferId`,
-          { Status: finalStatus, DecisionBy: 'N8N_Workflow', Rejection: rejectionReason, TransferId: transferId }
-        );
-      }
+      rejectionReason = n8nResponse?.rejection_reason || null;
+      const applied = await applyWorkflowDecision({
+        decision,
+        isTransfer: true,
+        requestId: transferId,
+        rejectionReason
+      });
+      if (applied) finalStatus = applied;
     }
 
     res.json({ transfer_id: transferId, status: finalStatus, rejection_reason: rejectionReason });
