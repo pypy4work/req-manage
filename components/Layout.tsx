@@ -325,7 +325,7 @@ export const Layout: React.FC<LayoutProps> = ({ user, currentRoute, onLogout, on
       </div>
 
       {/* MAIN CONTENT */}
-      <main className="flex-1 h-full overflow-y-auto relative flex flex-col pt-16 md:pt-0 custom-scrollbar">
+      <main className="flex-1 h-full overflow-y-auto relative flex flex-col pt-16 md:pt-0 custom-scrollbar" data-cosmic-scroll>
           <div className="flex-1 p-4 md:p-8 animate-in fade-in slide-in-from-bottom-4 duration-500 max-w-7xl w-full mx-auto">
              {children}
           </div>

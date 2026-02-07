@@ -351,7 +351,7 @@ function AppContent() {
         --line-height-base: ${activeScale.lh};
         --transition-speed: 0.4s;
       }
-      body { 
+      html, body { 
         background-color: var(--bg-body); 
         color: var(--text-main); 
         line-height: var(--line-height-base);

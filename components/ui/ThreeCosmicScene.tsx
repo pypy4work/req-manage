@@ -10,6 +10,11 @@ interface ThreeCosmicSceneProps {
     palette?: CosmicPalette;
     structure?: CosmicStructure;
     interactive?: boolean;
+    scrollStateRef?: React.MutableRefObject<{
+        progress: number;
+        velocity: number;
+        intensity: number;
+    }>;
 }
 
 // --- ENHANCED PALETTES (FANTASY THEMED) ---
@@ -54,7 +59,8 @@ export const ThreeCosmicScene: React.FC<ThreeCosmicSceneProps> = ({
     zoom = 450,
     palette = 'default',
     structure = 'spiral',
-    interactive = true
+    interactive = true,
+    scrollStateRef
 }) => {
     const containerRef = useRef<HTMLDivElement>(null);
     const sceneRef = useRef<THREE.Scene | null>(null);
@@ -68,6 +74,8 @@ export const ThreeCosmicScene: React.FC<ThreeCosmicSceneProps> = ({
     const requestRef = useRef<number>(0);
     const timeRef = useRef(0);
     const shockwaveRef = useRef({ active: false, time: 0, x: 0, y: 0 });
+    const baseZoomRef = useRef(zoom);
+    const baseFovRef = useRef(70);
 
     // Caches
     const baseColorsRef = useRef<Float32Array | null>(null);
@@ -94,6 +102,8 @@ export const ThreeCosmicScene: React.FC<ThreeCosmicSceneProps> = ({
         // Tilt camera slightly for dramatic effect
         camera.rotation.x = -0.1;
         cameraRef.current = camera;
+        baseZoomRef.current = zoom;
+        baseFovRef.current = camera.fov;
 
         const renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true, powerPreference: "high-performance" });
         renderer.setSize(w, h);
@@ -221,7 +231,15 @@ export const ThreeCosmicScene: React.FC<ThreeCosmicSceneProps> = ({
         // --- 3. ANIMATION LOOP ---
         const animate = () => {
             requestRef.current = requestAnimationFrame(animate);
-            timeRef.current += 0.005 * speed;
+            const scrollState = scrollStateRef?.current;
+            const scrollProgress = scrollState?.progress ?? 0;
+            const scrollVelocity = scrollState?.velocity ?? 0;
+            const scrollIntensity = scrollState?.intensity ?? 1;
+            const velocityAbs = Math.min(Math.abs(scrollVelocity), 140);
+            const velocityNorm = Math.min(velocityAbs / 140, 1);
+            const scrollBoost = 1 + velocityNorm * 0.7 * scrollIntensity;
+
+            timeRef.current += 0.005 * speed * scrollBoost;
 
             if (galaxyRef.current && baseColorsRef.current && baseSizesRef.current) {
                 const geom = galaxyRef.current.geometry;
@@ -236,9 +254,10 @@ export const ThreeCosmicScene: React.FC<ThreeCosmicSceneProps> = ({
                 const baseCols = baseColorsRef.current;
                 const baseSizes = baseSizesRef.current;
 
-                // Slow Rotation of the whole system
-                galaxyRef.current.rotation.y += 0.0003 * speed;
-                galaxyRef.current.rotation.z += 0.0001 * speed * chaos;
+                // Slow Rotation of the whole system + scroll boost
+                const swirlBoost = 1 + velocityNorm * 0.8 * scrollIntensity;
+                galaxyRef.current.rotation.y += 0.0003 * speed * swirlBoost;
+                galaxyRef.current.rotation.z += 0.0001 * speed * chaos * (1 + velocityNorm * 1.2 * scrollIntensity);
 
                 // Mouse 3D Position Projection
                 const vector = new THREE.Vector3(mouseRef.current.x, mouseRef.current.y, 0.5);
@@ -335,6 +354,26 @@ export const ThreeCosmicScene: React.FC<ThreeCosmicSceneProps> = ({
             
             camera.rotation.x += (targetRotation.current.x - camera.rotation.x) * 0.05;
             camera.rotation.y += (targetRotation.current.y - camera.rotation.y) * 0.05;
+
+            // Scroll-driven "space swim" zoom toward center
+            const baseZoom = baseZoomRef.current || zoom;
+            const depth = (scrollProgress * 220 + velocityNorm * 160) * scrollIntensity;
+            const targetZ = Math.max(baseZoom - depth, baseZoom * 0.45);
+            camera.position.z += (targetZ - camera.position.z) * 0.08;
+
+            // Slight FOV squeeze for warp feel
+            const baseFov = baseFovRef.current || 70;
+            const targetFov = baseFov - velocityNorm * 8 * scrollIntensity - scrollProgress * 2 * scrollIntensity;
+            camera.fov += (targetFov - camera.fov) * 0.08;
+            camera.updateProjectionMatrix();
+
+            // Subtle scale pulse tied to scroll progress
+            if (galaxyRef.current) {
+                const targetScale = 1 + scrollProgress * 0.08 * scrollIntensity;
+                const currentScale = galaxyRef.current.scale.x || 1;
+                const nextScale = currentScale + (targetScale - currentScale) * 0.05;
+                galaxyRef.current.scale.setScalar(nextScale);
+            }
 
             renderer.render(scene, camera);
         };

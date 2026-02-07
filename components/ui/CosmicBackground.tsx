@@ -1,5 +1,5 @@
 
-import React, { Suspense } from 'react';
+import React, { Suspense, useEffect, useRef } from 'react';
 import { SystemSettings } from '../../types';
 import { ThreeCosmicScene } from './ThreeCosmicScene';
 
@@ -10,6 +10,13 @@ interface CosmicBackgroundProps {
 }
 
 export const CosmicBackground: React.FC<CosmicBackgroundProps> = ({ settings, intensity = 'normal', className = '' }) => {
+    const containerRef = useRef<HTMLDivElement>(null);
+    const scrollStateRef = useRef({
+        progress: 0,
+        velocity: 0,
+        intensity: 1
+    });
+
     const patternStyle = settings?.sidebar_pattern_style || 'stars';
     const animationType = settings?.sidebar_animation || 'flow'; // Default to flow
     const isHigh = intensity === 'high';
@@ -20,6 +27,117 @@ export const CosmicBackground: React.FC<CosmicBackgroundProps> = ({ settings, in
     const zoom = settings?.cosmic_zoom ?? 450;
     const palette = settings?.cosmic_palette ?? 'default';
     const structure = settings?.cosmic_structure ?? 'spiral';
+
+    useEffect(() => {
+        if (typeof window === 'undefined') return;
+        const container = containerRef.current;
+        if (!container) return;
+
+        const clamp = (n: number, min: number, max: number) => Math.min(max, Math.max(min, n));
+        const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
+
+        const findScrollTarget = () => {
+            const el = document.querySelector('[data-cosmic-scroll]') as HTMLElement | null;
+            return el || window;
+        };
+
+        let scrollEl: HTMLElement | Window = findScrollTarget();
+        let lastScroll = 0;
+        let targetProgress = 0;
+        let targetVelocity = 0;
+        let rafId = 0;
+
+        const getScrollTop = (target: HTMLElement | Window) => {
+            if (target === window) return window.scrollY || document.documentElement.scrollTop || 0;
+            return target.scrollTop || 0;
+        };
+
+        const getScrollMax = (target: HTMLElement | Window) => {
+            if (target === window) {
+                const doc = document.documentElement;
+                return Math.max(0, (doc.scrollHeight || 0) - window.innerHeight);
+            }
+            return Math.max(0, target.scrollHeight - target.clientHeight);
+        };
+
+        const updateTarget = () => {
+            // Re-resolve scroll element in case layout mounted after this effect
+            const resolved = findScrollTarget();
+            if (resolved !== scrollEl) {
+                if (scrollEl && scrollEl !== window) {
+                    scrollEl.removeEventListener('scroll', updateTarget as EventListener);
+                } else {
+                    window.removeEventListener('scroll', updateTarget);
+                }
+                scrollEl = resolved;
+                if (scrollEl === window) {
+                    window.addEventListener('scroll', updateTarget, { passive: true });
+                } else {
+                    scrollEl.addEventListener('scroll', updateTarget as EventListener, { passive: true });
+                }
+                lastScroll = getScrollTop(scrollEl);
+            }
+
+            const current = getScrollTop(scrollEl);
+            targetVelocity = current - lastScroll;
+            lastScroll = current;
+            const max = getScrollMax(scrollEl);
+            targetProgress = max > 0 ? clamp(current / max, 0, 1) : 0;
+        };
+
+        const tick = () => {
+            const patternFactor = patternStyle === 'stars' ? 1 : patternStyle === 'custom' ? 0.9 : 0.85;
+            const animationFactor = animationType === 'static' ? 0.6 : animationType === 'pulse' ? 0.85 : animationType === 'spin' ? 0.95 : 1;
+            const chaosFactor = 0.7 + clamp(chaos, 0, 1) * 0.7;
+            const speedFactor = 0.75 + clamp(speed, 0.1, 5) * 0.08;
+            const baseIntensity = isHigh ? 1.1 : 0.75;
+            const motionIntensity = clamp(baseIntensity * patternFactor * animationFactor * chaosFactor * speedFactor, 0.4, 1.8);
+
+            const state = scrollStateRef.current;
+            state.intensity = motionIntensity;
+            state.progress = lerp(state.progress, targetProgress, 0.08);
+            state.velocity = lerp(state.velocity, targetVelocity, 0.2);
+            targetVelocity *= 0.65;
+
+            const velocityAbs = Math.min(Math.abs(state.velocity), 140);
+            const velocityNorm = clamp(velocityAbs / 140, 0, 1);
+            const zoom = 1 + (state.progress * 0.12 + velocityNorm * 0.09) * motionIntensity;
+            const drift = (state.progress * 60 + velocityNorm * 140) * motionIntensity;
+            const swirl = (state.velocity >= 0 ? 1 : -1) * velocityNorm * 2.5 * motionIntensity;
+            const shiftX = Math.sin(state.progress * Math.PI * 2) * 6 * motionIntensity;
+            const shiftY = -drift * 0.15;
+            const brightness = 1 + velocityNorm * 0.2 * motionIntensity;
+
+            container.style.setProperty('--cosmic-zoom', zoom.toFixed(3));
+            container.style.setProperty('--cosmic-drift', drift.toFixed(2));
+            container.style.setProperty('--cosmic-swirl', `${swirl.toFixed(2)}deg`);
+            container.style.setProperty('--cosmic-shift-x', `${shiftX.toFixed(2)}px`);
+            container.style.setProperty('--cosmic-shift-y', `${shiftY.toFixed(2)}px`);
+            container.style.setProperty('--cosmic-brightness', brightness.toFixed(3));
+            container.style.setProperty('--cosmic-velocity', velocityNorm.toFixed(3));
+
+            rafId = window.requestAnimationFrame(tick);
+        };
+
+        updateTarget();
+        if (scrollEl === window) {
+            window.addEventListener('scroll', updateTarget, { passive: true });
+        } else {
+            scrollEl.addEventListener('scroll', updateTarget as EventListener, { passive: true });
+        }
+        window.addEventListener('resize', updateTarget);
+        rafId = window.requestAnimationFrame(tick);
+
+        return () => {
+            window.removeEventListener('resize', updateTarget);
+            if (scrollEl === window) {
+                window.removeEventListener('scroll', updateTarget);
+            } else {
+                scrollEl.removeEventListener('scroll', updateTarget as EventListener);
+            }
+            window.cancelAnimationFrame(rafId);
+        };
+    }, [patternStyle, animationType, chaos, speed, isHigh]);
 
     const getPatternStyle = () => {
         if (patternStyle === 'custom' && settings?.sidebar_pattern_url) {
@@ -54,9 +172,16 @@ export const CosmicBackground: React.FC<CosmicBackgroundProps> = ({ settings, in
         }
     };
 
+    const motionStyle: React.CSSProperties = {
+        transform: 'translate3d(var(--cosmic-shift-x, 0px), var(--cosmic-shift-y, 0px), 0) scale(var(--cosmic-zoom, 1)) rotate(var(--cosmic-swirl, 0deg))',
+        transformOrigin: 'center',
+        willChange: 'transform, filter',
+        filter: 'brightness(var(--cosmic-brightness, 1))'
+    };
+
     // NOTE: pointer-events-none removed from main container to allow clicks on ThreeJS canvas
     return (
-        <div className={`absolute inset-0 overflow-hidden select-none ${className}`}>
+        <div ref={containerRef} className={`absolute inset-0 overflow-hidden select-none ${className}`}>
             {/* 1. Base Deep Gradient (using CSS vars from App.tsx) */}
             <div className={`absolute inset-0 bg-gradient-to-b from-[var(--sidebar-from)] to-[var(--sidebar-to)] transition-colors duration-1000 ${isHigh ? 'opacity-90' : 'opacity-100'}`}></div>
             
@@ -66,34 +191,45 @@ export const CosmicBackground: React.FC<CosmicBackgroundProps> = ({ settings, in
             {/* 3. Dynamic Pattern Layer with Variable Animation */}
             {patternStyle === 'stars' ? (
                 <div className={`absolute inset-0 ${isHigh ? 'cosmic-container' : ''}`}>
+                    <div className="absolute inset-0" style={motionStyle}>
                     
-                    {/* Render 3D WebGL Scene if 'stars' is selected. 
-                        We wrap in Suspense/Fallback in case Three.js fails to load or context is lost 
-                    */}
-                    <div className="absolute inset-0 z-0">
-                        <ThreeCosmicScene 
-                            speed={isHigh ? (speed * 1.2) : (speed * 0.5)} // Slightly faster on login
-                            chaos={chaos}
-                            zoom={isHigh ? zoom : (zoom + 200)} // Further back for sidebar
-                            palette={palette}
-                            structure={structure}
-                            interactive={true} // Always interactive now
-                        />
-                    </div>
+                        {/* Render 3D WebGL Scene if 'stars' is selected. 
+                            We wrap in Suspense/Fallback in case Three.js fails to load or context is lost 
+                        */}
+                        <div className="absolute inset-0 z-0">
+                            <ThreeCosmicScene 
+                                speed={isHigh ? (speed * 1.2) : (speed * 0.5)} // Slightly faster on login
+                                chaos={chaos}
+                                zoom={isHigh ? zoom : (zoom + 200)} // Further back for sidebar
+                                palette={palette}
+                                structure={structure}
+                                interactive={true} // Always interactive now
+                                scrollStateRef={scrollStateRef}
+                            />
+                        </div>
 
-                    {/* CSS Fallback / Overlay Layers (Subtle blending) */}
-                    <div className="stars-lg absolute inset-0 opacity-10 pointer-events-none"></div>
+                        {/* CSS Fallback / Overlay Layers (Subtle blending) */}
+                        <div className="stars-lg absolute inset-0 opacity-10 pointer-events-none"></div>
                     
-                    {/* Shooting Star Effect (Only for High Intensity) - CSS Overlay on top of 3D */}
-                    {isHigh && (
-                        <>
-                            <div className="absolute top-0 right-0 w-[2px] h-[100px] bg-gradient-to-b from-transparent via-white to-transparent rotate-45 opacity-0 animate-ping-slow" style={{ animationDuration: '4s', right: '20%' }}></div>
-                            <div className="absolute top-1/4 left-0 w-[2px] h-[150px] bg-gradient-to-b from-transparent via-cyan-200 to-transparent -rotate-45 opacity-0 animate-ping-slow" style={{ animationDuration: '7s', animationDelay: '2s' }}></div>
-                        </>
-                    )}
+                        {/* Shooting Star Effect (Only for High Intensity) - CSS Overlay on top of 3D */}
+                        {isHigh && (
+                            <>
+                                <div className="absolute top-0 right-0 w-[2px] h-[100px] bg-gradient-to-b from-transparent via-white to-transparent rotate-45 opacity-0 animate-ping-slow" style={{ animationDuration: '4s', right: '20%' }}></div>
+                                <div className="absolute top-1/4 left-0 w-[2px] h-[150px] bg-gradient-to-b from-transparent via-cyan-200 to-transparent -rotate-45 opacity-0 animate-ping-slow" style={{ animationDuration: '7s', animationDelay: '2s' }}></div>
+                            </>
+                        )}
+                    </div>
                 </div>
             ) : (
-                <div className={`absolute inset-0 transition-all duration-500 ${getAnimationClass()}`} style={getPatternStyle()}></div>
+                <div className="absolute inset-0" style={motionStyle}>
+                    <div
+                        className={`absolute inset-0 transition-all duration-500 ${getAnimationClass()}`}
+                        style={{
+                            ...getPatternStyle(),
+                            backgroundPosition: 'calc(50% + var(--cosmic-shift-x, 0px)) calc(50% + var(--cosmic-shift-y, 0px))'
+                        }}
+                    ></div>
+                </div>
             )}
 
             {/* 4. Ambient Glows (Nebula Effect via CSS for performance blending) */}
